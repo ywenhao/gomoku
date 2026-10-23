@@ -180,10 +180,35 @@ jobs:
           path: dist/android/gomoku-android.apk
           if-no-files-found: error
 
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-nsh
+        with:
+          version: ${{ env.NSH_VERSION }}
+      - name: 打包
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 静态站点：index.html 加内容哈希命名的 wasm/js/字节码，丢给任意
+          # 服务器或 CDN 即可。需要 http 协议，直接双击 index.html 打不开。
+          nsh package --target web -o dist/web
+          cd dist/web
+          # 压缩包放到上一级，免得把自己也打进去。
+          zip -qr ../gomoku-web.zip .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gomoku-web
+          path: dist/web/gomoku-web.zip
+          if-no-files-found: error
+
   release:
     name: 发布
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [check, windows, linux, macos, android]
+    needs: [check, windows, linux, macos, android, web]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
