@@ -65,7 +65,11 @@ gomoku/
 │   ├── score.test.ts    计分规则单元测试
 │   └── match.test.ts    自对弈回归（强度与单步耗时）
 ├── App.test.tsx         界面流程测试（落子、悔棋、重开、判胜、菜单、计分、倒计时）
-├── nsh.json             应用名、id、版本、图标、亮色外观
+├── nsh.json             应用名、id、版本、图标、亮色外观（版本号的唯一来源）
+├── package.json         只有 scripts，没有依赖：命令别名 + 版本号镜像
+├── scripts/
+│   ├── release.mjs      校验版本 / 工作区 / tag，然后打 tag 并推送
+│   └── clean.mjs        删 dist/（--all 连 .nsh/、.shots/ 一起）
 ├── icon.png             应用图标（用 nsh 的 Canvas 绘制导出）
 ├── .github/
 │   ├── workflows/build.yml    CI：检查 + 六平台打包，上传 artifact
@@ -74,29 +78,50 @@ gomoku/
 └── dist/                本地打包产物（CI 的产物在 Releases）
 ```
 
-## 运行
+## 命令
 
-先装 nsh（本机已通过 mise 安装）：
+常用命令都收在 `package.json` 里，`npm run <name>` 就行；右列是它实际执行的
+nsh 命令 —— **`npm` 只是别名，不是依赖**，项目没有 `dependencies`，不装 Node
+也能直接用右边的命令。
 
-```sh
-nsh --version          # 0.2.0
-```
+| script | 实际执行 | 用途 |
+| --- | --- | --- |
+| `npm run dev` | `nsh run .` | 当前系统的原生窗口（Windows 上是 Win32），热更新 |
+| `npm run dev:web` | `nsh run . --target web` | 浏览器，终端会打印地址 |
+| `npm run dev:android` | `nsh run . --target android` | 需要已启动的模拟器或已连接的设备 |
+| `npm run dev:ios` | `nsh run . --target ios` | 仅 macOS + Xcode 可用 |
+| `npm run check` | `nsh check` | TypeScript 类型检查 |
+| `npm test` | `nsh test` | 全部 38 个测试 |
+| `npm test -- lib/score.test.ts` | `nsh test lib/score.test.ts` | 只跑一个文件 |
+| `npm run verify` | `nsh check` + `nsh test` | 提交前跑一遍 |
+| `npm run build` | `nsh build .` | 编译成 QuickJS 字节码，不打包 |
+| `npm run build:release` | `nsh build . --release` | 同上，压缩并去掉调试信息 |
+| `npm run package:windows` | `nsh package --target windows -o dist/windows` | `五子棋/` + `五子棋.zip` |
+| `npm run package:linux` | `nsh package --target linux -o dist/linux` | `五子棋/` + `五子棋.tar.gz` |
+| `npm run package:macos` | `nsh package --target macos -o dist/macos` | ad hoc 签名的 `五子棋.app` |
+| `npm run package:android` | `nsh package --target android -o dist/android` | `.apk`（需 Android SDK + JDK） |
+| `npm run package:web` | `nsh package --target web -o dist/web` | 静态站点，丢给任意服务器 / CDN |
+| `npm run package:ios` | `nsh package --target ios -o dist/ios` | `.ipa`（需 macOS + Xcode + 签名） |
+| `npm run clean` | — | 删 `dist/` |
+| `npm run clean:all` | — | 连 `.nsh/`（编译缓存）、`.shots/` 一起删 |
+| `npm run release:dry` | — | 只检查版本、tag、工作区，不落改动 |
+| `npm run release` | — | 打 tag 并推送，CI 自动构建 + 发 Release |
 
-```sh
-cd gomoku
+前提是 `nsh` 在 PATH 里（`nsh --version` 应输出 `0.2.0`）。本机是 `mise use -g
+github:longbridge/nsh` 装的，shim 在 `~/.local/share/mise/shims`，没进 PATH 的话
+`npm run` 会报 `nsh: command not found`。
 
-nsh run .                    # 当前系统（Windows 上是 Win32 原生窗口）
-nsh run . --target web       # 浏览器，终端会打印地址
-nsh run . --target android   # 需要已启动的模拟器或已连接的设备
-nsh run . --target ios       # 仅 macOS + Xcode 可用
-```
+`release` 与 `clean` 是 `scripts/` 下的 Node 脚本：前者要读 `nsh.json` 的版本、
+核对 `package.json` 是否一致、判断 tag 有没有被占，纯 shell 在 Windows 的 cmd
+下跑不通；后者只是为了让三个系统共用一条删除命令。
 
 保存文件会热更新，终端同时打印日志与报错。
 
 ## 测试
 
 ```sh
-nsh test                 # 全部：规则、AI、计分、界面流程、自对弈
+npm run verify           # check + test
+nsh test                 # 只跑测试：规则、AI、计分、界面流程、自对弈
 nsh test lib/score.test.ts
 nsh check                # TypeScript 类型检查
 ```
@@ -110,11 +135,15 @@ nsh check                # TypeScript 类型检查
 ## 打包
 
 ```sh
-nsh package --target windows -o dist/windows   # dist/windows/五子棋/五子棋.exe + .zip
-nsh package --target web     -o dist/web       # 静态站点，丢给任意服务器/CDN
-nsh package --target android -o dist/android   # .apk（需 Android SDK + JDK）
-nsh package --target ios     -o dist/ios       # .ipa（需 macOS + Xcode + 签名）
+npm run package:windows   # → dist/windows/五子棋/五子棋.exe 和 五子棋.zip
+npm run package:web       # → dist/web/五子棋/（index.html + 内容哈希资源）
+npm run package:android   # → dist/android/五子棋.apk（需 Android SDK + JDK）
+npm run package:ios       # → dist/ios/五子棋.ipa（需 macOS + Xcode + 签名）
 ```
+
+**只能在目标系统上打对应的包**：nsh 每个宿主系统发一份发行包，里面只有该系统的
+runner，所以在 Windows 上 `package:linux` 会报 `nsh-linux-app not found`。跨平台
+构建交给 CI（见下）。
 
 Windows 包解压后直接双击 `五子棋.exe` 即可运行（运行时在同目录的 `nsh/` 里，别分开）。
 懒得自己打的话，直接去 [Releases](https://github.com/ywenhao/gomoku/releases) 下现成的：
@@ -142,8 +171,12 @@ PR 和手动触发时跑六个 job：
 但 `if` 判断 `head_branch` 不是 `v*` 就直接跳过，不会误发。
 
 ```sh
-git tag -a v1.0.1 -m "五子棋 1.0.1" && git push origin v1.0.1
+# 改 nsh.json 和 package.json 里的 version，提交，然后：
+npm run release:dry      # 只检查：版本是否一致、工作区是否干净、tag 是否被占
+npm run release          # 打 tag 并推送，剩下的交给 CI
 ```
+
+等价的手动命令是 `git tag -a v1.0.1 -m "五子棋 1.0.1" && git push origin v1.0.1`。
 
 要补发历史版本时，用 `workflow_dispatch` 手动填 build 的 run id 和 tag 名
 （artifact 只保留 90 天，过期了得重新推 tag）。
