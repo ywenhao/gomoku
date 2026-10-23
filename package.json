@@ -1,0 +1,30 @@
+{
+  "name": "gomoku",
+  "version": "1.0.0",
+  "private": true,
+  "description": "跨平台五子棋 · Native Shell (nsh.dev) · Windows / Linux / Android / macOS / Web",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "nsh run .",
+    "dev:web": "nsh run . --target web",
+    "dev:android": "nsh run . --target android",
+    "dev:ios": "nsh run . --target ios",
+    "check": "nsh check",
+    "test": "nsh test",
+    "verify": "npm run check && npm test",
+    "build": "nsh build .",
+    "build:release": "nsh build . --release",
+    "package:windows": "nsh package --target windows -o dist/windows",
+    "package:linux": "nsh package --target linux -o dist/linux",
+    "package:macos": "nsh package --target macos -o dist/macos",
+    "package:android": "nsh package --target android -o dist/android",
+    "package:web": "nsh package --target web -o dist/web",
+    "package:ios": "nsh package --target ios -o dist/ios",
+    "clean": "node scripts/clean.mjs",
+    "clean:all": "node scripts/clean.mjs --all",
+    "release": "node scripts/release.mjs",
+    "release:dry": "node scripts/release.mjs --dry-run"
+  }
+}

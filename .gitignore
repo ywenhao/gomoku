@@ -2,3 +2,8 @@
 target/
 dist/
 .shots/
+
+# 这个项目不装依赖（package.json 里只有 scripts），留着是防止有人顺手
+# npm install 之后把 node_modules 提交上来。
+node_modules/
+package-lock.json
