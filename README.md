@@ -67,6 +67,9 @@ gomoku/
 ├── App.test.tsx         界面流程测试（落子、悔棋、重开、判胜、菜单、计分、倒计时）
 ├── nsh.json             应用名、id、版本、图标、亮色外观
 ├── icon.png             应用图标（用 nsh 的 Canvas 绘制导出）
+├── .github/
+│   ├── workflows/build.yml    CI：检查 + 四平台打包 + tag 发 Release
+│   └── actions/setup-nsh/     安装并缓存 nsh 发行包
 └── dist/                打包产物（web / windows）
 ```
 
@@ -113,6 +116,35 @@ nsh package --target ios     -o dist/ios       # .ipa（需 macOS + Xcode + 签�
 ```
 
 Windows 包解压后直接双击 `五子棋.exe` 即可运行（运行时在同目录的 `nsh/` 里，别分开）。
+
+## 持续集成
+
+`.github/workflows/build.yml` 在 `main` 的 push、PR 和手动触发时跑五个 job，推送 `v*`
+tag 时额外把四个平台包发成 GitHub Release：
+
+| Job | Runner | 产物 |
+| --- | --- | --- |
+| 类型检查与测试 | `ubuntu-latest` | `nsh check` + 38 个测试 |
+| Windows x64 | `windows-latest` | `gomoku-windows-x64.zip` |
+| Linux x64 | `ubuntu-latest` | `gomoku-linux-x64.tar.gz` |
+| macOS arm64 | `macos-latest` | `gomoku-macos-arm64.zip` |
+| Android | `ubuntu-latest` | `gomoku-android.apk` |
+
+几个和 nsh 有关的注意点：
+
+- **每个 job 只能打自己系统的包**。nsh 每个宿主系统发一份发行包，里面只有该系统
+  的 runner（`runtime/<platform>/nsh-*-app`），所以 Linux 的包必须在 Linux 上打、
+  macOS 的必须在 macOS 上打。`.github/actions/setup-nsh` 负责按 runner 系统装对应
+  那份并缓存 `~/.nsh`。
+- **macOS 只有 arm64 版**，所以用 `macos-latest`（Apple Silicon）并断言 `uname -m`；
+  要 Intel 包得从源码编 nsh。产物用 `ditto` 打包，保留 bundle 里的软链与权限位。
+- **Linux 包运行需要 GTK 4.14+**（Ubuntu 24.04 及以上）；打包本身只用到 `tar`。
+- **Android 签名**：仓库里配好 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEY_ALIAS`、
+  `ANDROID_KEYSTORE_PASSWORD` 三个 secret 就走正式签名，否则用标准 debug key
+  （能装到设备上试玩，上不了商店）。
+- **iOS 没放进来**：`nsh package --target ios` 需要 Apple 开发者证书与
+  `.mobileprovision`，得有账号才能签，不适合默认跑在公开仓库里。要加的话在
+  macOS job 里补一步 `--sign <identity> --profile <file>` 即可。
 
 ## 实现要点
 
