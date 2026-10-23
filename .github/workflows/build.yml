@@ -1,0 +1,181 @@
+name: build
+
+# 为 nsh 支持的所有桌面与移动目标各打一个可安装包：Windows、Linux、
+# Android、macOS。推送 v* tag 时，四个包会一并发布成 GitHub Release。
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - ".shots/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NSH_VERSION: v0.2.0
+
+jobs:
+  check:
+    name: 类型检查与测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nsh
+        with:
+          version: ${{ env.NSH_VERSION }}
+      - name: 类型检查
+        run: nsh check
+      - name: 测试
+        run: nsh test
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nsh
+        with:
+          version: ${{ env.NSH_VERSION }}
+      - name: 打包
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 产出 <out>/<name>/ 与 <out>/<name>.zip，zip 里是 <name>.exe 加旁边的 nsh/。
+          nsh package --target windows -o dist/windows
+          mv dist/windows/*.zip dist/windows/gomoku-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gomoku-windows-x64
+          path: dist/windows/gomoku-windows-x64.zip
+          if-no-files-found: error
+
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nsh
+        with:
+          version: ${{ env.NSH_VERSION }}
+      - name: 打包
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 产出 <out>/<name>/（GTK runner + nsh/ + .desktop）和同名 .tar.gz。
+          # 运行需要 GTK 4.14+，即 Ubuntu 24.04 及以上。
+          nsh package --target linux -o dist/linux
+          mv dist/linux/*.tar.gz dist/linux/gomoku-linux-x64.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gomoku-linux-x64
+          path: dist/linux/gomoku-linux-x64.tar.gz
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64
+    # nsh 只发 arm64 的 macOS 包（没有 Intel 版），所以必须是 Apple Silicon
+    # 的 runner；万一哪天不是了，下面的断言会直接报出来。
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nsh
+        with:
+          version: ${{ env.NSH_VERSION }}
+      - name: 打包
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64 || {
+            echo "nsh 没有 Intel macOS 版，请换 arm64 runner" >&2
+            exit 1
+          }
+          # 产出 ad hoc 签名的 .app；codesign 与 sips 由 Xcode 命令行工具提供。
+          nsh package --target macos -o dist/macos
+          # 用 ditto 而不是 zip：它保留 bundle 里的软链和权限位。
+          ditto -c -k --keepParent "dist/macos/五子棋.app" dist/macos/gomoku-macos-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gomoku-macos-arm64
+          path: dist/macos/gomoku-macos-arm64.zip
+          if-no-files-found: error
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nsh
+        with:
+          version: ${{ env.NSH_VERSION }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: 安装 Android SDK 组件
+        shell: bash
+        run: |
+          set -euo pipefail
+          # nsh 要用 build-tools 里的 aapt2、zipalign、apksigner，以及
+          # platforms/android-35/android.jar。runner 镜像里本来就有，
+          # 这里显式装一遍，免得哪天镜像更新把它们去掉。
+          sdkmanager="$(command -v sdkmanager || echo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager")"
+          yes | "$sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+      - name: 打包
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            # 上架用：仓库配好这三个 secret 就走正式签名。
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            nsh package --target android -o dist/android \
+              --keystore "$RUNNER_TEMP/release.jks" \
+              --key-alias "$KEY_ALIAS" \
+              --keystore-password "$KEYSTORE_PASSWORD"
+          else
+            # 没配 keystore 时 nsh 用标准 debug key 签名：能装到任何设备上试玩，
+            # 但上不了应用商店。
+            nsh package --target android -o dist/android
+          fi
+          mv dist/android/*.apk dist/android/gomoku-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gomoku-android
+          path: dist/android/gomoku-android.apk
+          if-no-files-found: error
+
+  release:
+    name: 发布
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, windows, linux, macos, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

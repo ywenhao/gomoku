@@ -1,0 +1,61 @@
+name: Setup nsh
+description: 安装 nsh CLI 及其预编译运行时，命中缓存时直接复用
+
+# nsh 每个宿主系统只发一个发行包，包里的 runtime/ 也只有该系统的 runner
+# （runtime/<platform>/<runner>，放在 bin/nsh 旁边）。所以打哪个系统的包，
+# 就得在哪个系统的 runner 上装它自己的那份 —— 别的系统那份里没有这个 runner。
+
+inputs:
+  version:
+    description: "发行版 tag，例如 v0.2.0（留空取最新）"
+    required: false
+    default: v0.2.0
+
+runs:
+  using: composite
+  steps:
+    - name: 还原 nsh
+      id: restore
+      uses: actions/cache@v4
+      with:
+        path: ~/.nsh
+        key: nsh-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
+
+    # 官方安装脚本会校验 sha256、整包解压到 NSH_INSTALL_DIR，再把 nsh 链到
+    # ~/.local/bin。这里跳过软链，直接把发行包自己的 bin 放进 PATH，
+    # 这样缓存的 ~/.nsh 就是下一次运行需要的一切。
+    - name: 安装 nsh（macOS、Linux）
+      if: steps.restore.outputs.cache-hit != 'true' && runner.os != 'Windows'
+      shell: bash
+      env:
+        NSH_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        # 缓存路径的 ~ 会展开成 $HOME，而环境变量里的不会，所以这里显式指定，
+        # 与缓存目录保持一致（安装脚本默认也是 ~/.nsh，这里写死以防万一）。
+        export NSH_INSTALL_DIR="$HOME/.nsh"
+        curl -fsSL https://nsh.dev/install.sh | sh
+
+    - name: 安装 nsh（Windows）
+      if: steps.restore.outputs.cache-hit != 'true' && runner.os == 'Windows'
+      shell: pwsh
+      env:
+        NSH_VERSION: ${{ inputs.version }}
+      run: |
+        $env:NSH_INSTALL_DIR = "$env:USERPROFILE\.nsh"
+        Invoke-Expression (Invoke-WebRequest -UseBasicParsing -Uri https://nsh.dev/install.ps1).Content
+
+    - name: 把 nsh 放进 PATH
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          echo "$USERPROFILE\\.nsh\\bin" >> "$GITHUB_PATH"
+          "$HOME/.nsh/bin/nsh.exe" --version
+        else
+          echo "$HOME/.nsh/bin" >> "$GITHUB_PATH"
+          "$HOME/.nsh/bin/nsh" --version
+        fi
+        # 列一下这份发行包带了哪些 runtime：缺了在这里就报，而不是等到
+        # nsh package 跑到一半才失败。
+        ls "$HOME/.nsh/runtime"
