@@ -1,0 +1,4 @@
+.nsh/
+target/
+dist/
+.shots/

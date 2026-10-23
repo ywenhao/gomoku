@@ -1,0 +1,11 @@
+{
+  "name": "五子棋",
+  "id": "com.gomoku.app",
+  "version": "1.0.0",
+  "build": 1,
+  "icon": "icon.png",
+  "appearance": "light",
+  "statusBar": {
+    "foreground": "dark"
+  }
+}
