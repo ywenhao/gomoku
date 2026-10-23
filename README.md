@@ -68,9 +68,10 @@ gomoku/
 ├── nsh.json             应用名、id、版本、图标、亮色外观
 ├── icon.png             应用图标（用 nsh 的 Canvas 绘制导出）
 ├── .github/
-│   ├── workflows/build.yml    CI：检查 + 四平台打包 + tag 发 Release
+│   ├── workflows/build.yml    CI：检查 + 六平台打包，上传 artifact
+│   ├── workflows/release.yml  把 tag 的构建产物发到 Releases
 │   └── actions/setup-nsh/     安装并缓存 nsh 发行包
-└── dist/                打包产物（web / windows）
+└── dist/                本地打包产物（CI 的产物在 Releases）
 ```
 
 ## 运行
@@ -116,11 +117,15 @@ nsh package --target ios     -o dist/ios       # .ipa（需 macOS + Xcode + 签�
 ```
 
 Windows 包解压后直接双击 `五子棋.exe` 即可运行（运行时在同目录的 `nsh/` 里，别分开）。
+懒得自己打的话，直接去 [Releases](https://github.com/ywenhao/gomoku/releases) 下现成的：
+五个平台的包都在那儿，`gomoku-web.zip` 解压后随便起个静态服务器就能在浏览器里玩
+（需要 http，双击 `index.html` 不行）。
 
 ## 持续集成
 
-`.github/workflows/build.yml` 在 `main` 的 push、PR 和手动触发时跑五个 job，推送 `v*`
-tag 时额外把四个平台包发成 GitHub Release：
+两个 workflow：`build.yml` 只负责构建并上传 artifact，`release.yml` 负责发到
+[Releases](https://github.com/ywenhao/gomoku/releases)。`build.yml` 在 `main` 的 push、
+PR 和手动触发时跑六个 job：
 
 | Job | Runner | 产物 |
 | --- | --- | --- |
@@ -129,6 +134,19 @@ tag 时额外把四个平台包发成 GitHub Release：
 | Linux x64 | `ubuntu-24.04` | `gomoku-linux-x64.tar.gz` |
 | macOS arm64 | `macos-26` | `gomoku-macos-arm64.zip` |
 | Android | `ubuntu-24.04` | `gomoku-android.apk` |
+| Web | `ubuntu-24.04` | `gomoku-web.zip`（静态站点） |
+
+**发版**：推一个 `v*` tag，`build` 会跑完六个 job，`release.yml` 通过 `workflow_run`
+接在它后面，用那次 build 的 run-id 跨 run 取回 artifact，挂到同名 tag 的 Release 上
+（`generate_release_notes` 自动生成说明）。非 tag 的构建跑完也会触发 `release.yml`，
+但 `if` 判断 `head_branch` 不是 `v*` 就直接跳过，不会误发。
+
+```sh
+git tag -a v1.0.1 -m "五子棋 1.0.1" && git push origin v1.0.1
+```
+
+要补发历史版本时，用 `workflow_dispatch` 手动填 build 的 run id 和 tag 名
+（artifact 只保留 90 天，过期了得重新推 tag）。
 
 几个和 nsh 有关的注意点：
 
