@@ -20,6 +20,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# 关于 Node 版本：这个项目本身不跑 Node（没有 package.json，打包、类型检查、
+# 测试全在 nsh 这一个二进制里，它自带 rolldown + oxc + QuickJS），所以不需要
+# actions/setup-node。CI 里出现的 Node 是各个 action 自己的运行时 —— 早先
+# actions/checkout@v4 之类声明的是 node20，GitHub 会强制在 node24 上跑并告警。
+# 现在统一到声明 node24 的版本（node24 就是当前的 LTS）：
+#   checkout v7 / cache v6 / upload-artifact v7 / download-artifact v8 /
+#   setup-java v6 / action-gh-release v3
+# 其中 upload-artifact 只有 v7 起、download-artifact 只有 v8 起才是 node24。
+# 想连大版本一起钉死的话，把 tag 换成 commit SHA 即可。
+
 env:
   NSH_VERSION: v0.2.0
 
@@ -29,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nsh
         with:
           version: ${{ env.NSH_VERSION }}
@@ -43,7 +53,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nsh
         with:
           version: ${{ env.NSH_VERSION }}
@@ -54,7 +64,7 @@ jobs:
           # 产出 <out>/<name>/ 与 <out>/<name>.zip，zip 里是 <name>.exe 加旁边的 nsh/。
           nsh package --target windows -o dist/windows
           mv dist/windows/*.zip dist/windows/gomoku-windows-x64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gomoku-windows-x64
           path: dist/windows/gomoku-windows-x64.zip
@@ -65,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nsh
         with:
           version: ${{ env.NSH_VERSION }}
@@ -77,7 +87,7 @@ jobs:
           # 运行需要 GTK 4.14+，即 Ubuntu 24.04 及以上。
           nsh package --target linux -o dist/linux
           mv dist/linux/*.tar.gz dist/linux/gomoku-linux-x64.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gomoku-linux-x64
           path: dist/linux/gomoku-linux-x64.tar.gz
@@ -90,7 +100,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nsh
         with:
           version: ${{ env.NSH_VERSION }}
@@ -106,7 +116,7 @@ jobs:
           nsh package --target macos -o dist/macos
           # 用 ditto 而不是 zip：它保留 bundle 里的软链和权限位。
           ditto -c -k --keepParent "dist/macos/五子棋.app" dist/macos/gomoku-macos-arm64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gomoku-macos-arm64
           path: dist/macos/gomoku-macos-arm64.zip
@@ -117,11 +127,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nsh
         with:
           version: ${{ env.NSH_VERSION }}
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -156,7 +166,7 @@ jobs:
             nsh package --target android -o dist/android
           fi
           mv dist/android/*.apk dist/android/gomoku-android.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gomoku-android
           path: dist/android/gomoku-android.apk
@@ -171,11 +181,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true

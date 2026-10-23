@@ -16,7 +16,7 @@ runs:
   steps:
     - name: 还原 nsh
       id: restore
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.nsh
         key: nsh-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
