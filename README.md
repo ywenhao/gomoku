@@ -124,19 +124,27 @@ tag 时额外把四个平台包发成 GitHub Release：
 
 | Job | Runner | 产物 |
 | --- | --- | --- |
-| 类型检查与测试 | `ubuntu-latest` | `nsh check` + 38 个测试 |
-| Windows x64 | `windows-latest` | `gomoku-windows-x64.zip` |
-| Linux x64 | `ubuntu-latest` | `gomoku-linux-x64.tar.gz` |
-| macOS arm64 | `macos-latest` | `gomoku-macos-arm64.zip` |
-| Android | `ubuntu-latest` | `gomoku-android.apk` |
+| 类型检查与测试 | `ubuntu-24.04` | `nsh check` + 38 个测试 |
+| Windows x64 | `windows-2025` | `gomoku-windows-x64.zip` |
+| Linux x64 | `ubuntu-24.04` | `gomoku-linux-x64.tar.gz` |
+| macOS arm64 | `macos-26` | `gomoku-macos-arm64.zip` |
+| Android | `ubuntu-24.04` | `gomoku-android.apk` |
 
 几个和 nsh 有关的注意点：
 
+- **版本都钉死了**。runner 镜像写具体版本而不是 `-latest`（`ubuntu-latest` 正要从
+  24.04 迁到 26.04，Android SDK 路径和预装组件都会跟着变），action 用声明 `node24`
+  的大版本：`checkout@v7`、`cache@v6`、`upload-artifact@v7`、`download-artifact@v8`、
+  `setup-java@v6`、`action-gh-release@v3`（注意 upload-artifact 要到 v7、
+  download-artifact 要到 v8 才换掉 node20）。
+- **项目本身不跑 Node**，没有 `package.json`，打包 / 类型检查 / 测试全在 nsh 这一个
+  二进制里，所以 workflow 里没有 `actions/setup-node`。CI 日志里出现的 Node 是各个
+  action 自己的运行时，不是本项目的依赖。
 - **每个 job 只能打自己系统的包**。nsh 每个宿主系统发一份发行包，里面只有该系统
   的 runner（`runtime/<platform>/nsh-*-app`），所以 Linux 的包必须在 Linux 上打、
   macOS 的必须在 macOS 上打。`.github/actions/setup-nsh` 负责按 runner 系统装对应
   那份并缓存 `~/.nsh`。
-- **macOS 只有 arm64 版**，所以用 `macos-latest`（Apple Silicon）并断言 `uname -m`；
+- **macOS 只有 arm64 版**，所以用 `macos-26`（Apple Silicon）并断言 `uname -m`；
   要 Intel 包得从源码编 nsh。产物用 `ditto` 打包，保留 bundle 里的软链与权限位。
 - **Linux 包运行需要 GTK 4.14+**（Ubuntu 24.04 及以上）；打包本身只用到 `tar`。
 - **Android 签名**：仓库里配好 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEY_ALIAS`、
