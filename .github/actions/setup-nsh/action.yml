@@ -43,7 +43,11 @@ runs:
         NSH_VERSION: ${{ inputs.version }}
       run: |
         $env:NSH_INSTALL_DIR = "$env:USERPROFILE\.nsh"
-        Invoke-Expression (Invoke-WebRequest -UseBasicParsing -Uri https://nsh.dev/install.ps1).Content
+        # GitHub 用 application/octet-stream 发这个脚本，pwsh 7 会把 Content
+        # 当 byte[] 交回来，Invoke-Expression 只收字符串，所以先解码。
+        $code = (Invoke-WebRequest -UseBasicParsing -Uri https://nsh.dev/install.ps1).Content
+        if ($code -is [byte[]]) { $code = [Text.Encoding]::UTF8.GetString($code) }
+        Invoke-Expression $code
 
     - name: 把 nsh 放进 PATH
       shell: bash
