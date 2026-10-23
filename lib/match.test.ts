@@ -1,5 +1,5 @@
 import { expect, test } from "nsh/test";
-import { findBestMove } from "./ai";
+import { findBestMove, type MoveOptions } from "./ai";
 import {
   createBoard,
   findWinLine,
@@ -12,6 +12,24 @@ import {
 /** 让出一次调用，避免超过单次执行时长上限 */
 const yieldTurn = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+/**
+ * 固定种子的线性同余随机数：简单档靠它挑点，换成固定序列后
+ * 同一局可以逐手复现，测试才不会时好时坏。
+ */
+function seeded(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+/**
+ * 把时间预算放得足够大，让搜索只受节点数约束 —— 否则同一局在快机器和
+ * 慢机器上搜到的层数不同，落子不同，结果也就不同。
+ */
+const deterministic: MoveOptions = { deadlineMs: 60_000, random: seeded(20261023) };
+
 async function playGame(blackLevel: Difficulty, whiteLevel: Difficulty) {
   const b = createBoard();
   let p: Player = 1;
@@ -19,7 +37,7 @@ async function playGame(blackLevel: Difficulty, whiteLevel: Difficulty) {
   let maxMs = 0;
   for (; n < 225; n++) {
     const t0 = Date.now();
-    const mv = findBestMove(b, p, p === 1 ? blackLevel : whiteLevel);
+    const mv = findBestMove(b, p, p === 1 ? blackLevel : whiteLevel, deterministic);
     const dt = Date.now() - t0;
     if (dt > maxMs) maxMs = dt;
     expect(mv !== null).toBe(true);

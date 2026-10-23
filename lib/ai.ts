@@ -333,9 +333,23 @@ function buildNear(b: Uint8Array): { n1: Uint8Array; n2: Uint8Array } {
   return { n1, n2 };
 }
 
-function pickEasy(list: Candidate[]): AiChoice {
+/**
+ * 单步搜索的预算与随机源。默认取档位设定；测试里把时间预算放大、
+ * 随机源换成固定种子，同一局就能逐手复现（否则搜到哪一层取决于
+ * 机器快慢，简单档还会随机挑点，自对弈结果无法重现）。
+ */
+export interface MoveOptions {
+  /** 搜索节点上限 */
+  maxNodes?: number;
+  /** 单步时间上限（毫秒） */
+  deadlineMs?: number;
+  /** 随机源，简单档挑点用 */
+  random?: () => number;
+}
+
+function pickEasy(list: Candidate[], random: () => number): AiChoice {
   const top = list.slice(0, 3);
-  const r = Math.random();
+  const r = random();
   const pick = r < 0.55 ? 0 : r < 0.85 ? 1 : 2;
   const m = top[Math.min(pick, top.length - 1)];
   return { x: m.x, y: m.y };
@@ -349,6 +363,7 @@ export function findBestMove(
   board: readonly number[],
   player: Player,
   level: Difficulty,
+  options?: MoveOptions,
 ): AiChoice | null {
   const b = Uint8Array.from(board);
   const { n1, n2 } = buildNear(b);
@@ -372,13 +387,14 @@ export function findBestMove(
   const blocks = root.list.filter((m) => m.th >= WIN_MOVE);
   const pool = blocks.length > 0 ? blocks : root.list;
 
-  if (level === "easy") return pickEasy(pool);
+  if (level === "easy") return pickEasy(pool, options?.random ?? Math.random);
 
   const depth = level === "hard" ? 4 : 2;
   const ctx: Ctx = {
     nodes: 0,
-    maxNodes: level === "hard" ? 24_000 : 8_000,
-    deadline: Date.now() + (level === "hard" ? 320 : 140),
+    maxNodes: options?.maxNodes ?? (level === "hard" ? 24_000 : 8_000),
+    deadline:
+      Date.now() + (options?.deadlineMs ?? (level === "hard" ? 320 : 140)),
     aborted: false,
   };
 
