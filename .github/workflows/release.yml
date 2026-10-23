@@ -1,0 +1,67 @@
+name: release
+
+# 把 build 打出来的五个包发布到 GitHub Releases。单独一个 workflow，是因为
+# 发布只关心「某个 tag 的构建全绿了没有」，跟怎么构建无关。
+#
+# 触发方式：build 跑完就触发一次，但只有「这次 build 来自 v* tag 且成功」
+# 才真的发。不用 tag push 直接触发，是因为那样拿不到 build 那一次的产物
+# （artifact 是挂在 build 的 run 上的，得用它的 run-id 去取）。
+
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+  # 手动补发：填一个已经构建成功的 tag（artifact 只保留 90 天，过期后要重新
+  # 推一次 tag 才有产物可发）。
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: "build 的 run id（gh run list 里那一列数字）"
+        required: true
+        type: string
+      tag:
+        description: "要发布的 tag，例如 v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write # 建 Release、传资产
+  actions: read # 跨 run 下载 artifact
+
+concurrency:
+  group: release-${{ github.event.workflow_run.head_branch || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: 发布到 Releases
+    # workflow_run 的 payload 里 head_branch 就是 tag 名；手动触发时不做判断。
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 取出 build 的产物
+        uses: actions/download-artifact@v8
+        with:
+          # 不填 run-id 只会取当前 run 的 artifact，而当前 run 什么都没构建，
+          # 所以必须显式指向 build 那次。
+          run-id: ${{ github.event.workflow_run.id || inputs.run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: dist
+          merge-multiple: true
+
+      - name: 列一下拿到的文件
+        shell: bash
+        run: ls -lh dist
+
+      - name: 发布
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event.workflow_run.head_branch || inputs.tag }}
+          files: dist/*
+          generate_release_notes: true
+          # 只有 v* 会走到这里，都是正式版，不标成 pre-release。
+          prerelease: false
