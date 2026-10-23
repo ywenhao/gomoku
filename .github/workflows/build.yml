@@ -29,6 +29,13 @@ concurrency:
 #   setup-java v6 / action-gh-release v3
 # 其中 upload-artifact 只有 v7 起、download-artifact 只有 v8 起才是 node24。
 # 想连大版本一起钉死的话，把 tag 换成 commit SHA 即可。
+#
+# 关于 runner 镜像：三个系统都写死具体版本，不用 -latest，这样镜像换代不会
+# 悄悄改变构建环境（ubuntu-latest 正要从 24.04 迁到 26.04，Android SDK 的
+# 路径和预装组件都可能跟着变）。要升级时改下面这几行即可：
+#   ubuntu-24.04 → ubuntu-26.04（LTS 对 LTS）
+#   windows-2025 → windows-2026
+#   macos-26 → macos-27（必须仍指向 arm64 那份）
 
 env:
   NSH_VERSION: v0.2.0
@@ -36,7 +43,7 @@ env:
 jobs:
   check:
     name: 类型检查与测试
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -50,7 +57,7 @@ jobs:
 
   windows:
     name: Windows x64
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -72,7 +79,7 @@ jobs:
 
   linux:
     name: Linux x64
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -96,8 +103,9 @@ jobs:
   macos:
     name: macOS arm64
     # nsh 只发 arm64 的 macOS 包（没有 Intel 版），所以必须是 Apple Silicon
-    # 的 runner；万一哪天不是了，下面的断言会直接报出来。
-    runs-on: macos-latest
+    # 的 runner：macos-26 指向的就是 arm64 那份（Intel 那份叫 macos-26-intel）。
+    # 万一哪天标签变了，下面的 uname 断言会直接报出来。
+    runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -124,7 +132,7 @@ jobs:
 
   android:
     name: Android
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -176,7 +184,7 @@ jobs:
     name: 发布
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [check, windows, linux, macos, android]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
