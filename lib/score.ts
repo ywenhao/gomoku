@@ -20,7 +20,12 @@ export const SPEED_TARGET = 120;
 /** 单局历史最多保留条数 */
 export const HISTORY_LIMIT = 40;
 
-const BASE: Record<Difficulty, number> = { easy: 100, normal: 180, hard: 300 };
+const BASE: Record<Difficulty, number> = {
+  easy: 100,
+  normal: 180,
+  hard: 300,
+  hell: 500,
+};
 
 export interface ScoreLine {
   label: string;

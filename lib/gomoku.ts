@@ -8,7 +8,7 @@ export const CELL_COUNT = SIZE * SIZE;
 export const WIN_LEN = 5;
 
 export type Player = 1 | 2;
-export type Difficulty = "easy" | "normal" | "hard";
+export type Difficulty = "easy" | "normal" | "hard" | "hell";
 export type Mode = "pve" | "pvp";
 
 export interface Move {

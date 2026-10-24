@@ -336,6 +336,59 @@ test("关掉应用重新打开，能从主页继续", async () => {
   expect(again.texts()).toContain("白棋落子");
 });
 
+test("主页帮助展示规则、棋型与开局说明", async () => {
+  const app = await launch();
+  await app.press("id:home-help");
+  await app.waitFor("id:help-panel");
+  const texts = app.texts();
+  expect(texts).toContain("帮助与规则");
+  expect(has(texts, "活四")).toBe(true);
+  expect(has(texts, "冲四")).toBe(true);
+  expect(has(texts, "开局布局")).toBe(true);
+  expect(has(texts, "VCF")).toBe(true);
+  expect(has(texts, "天元")).toBe(true);
+  expect(app.shows("id:help-close")).toBe(true);
+
+  await app.press("id:help-close");
+  await app.waitUntil(() => !app.shows("id:help-panel"));
+  expect(app.shows("id:home-new")).toBe(true);
+});
+
+test("对局菜单能打开帮助，帮助和菜单都会暂停倒计时", async () => {
+  const app = await fresh({ clock: {} });
+  await app.press("id:open-menu");
+  await app.press("id:menu-help");
+  await app.waitFor("id:help-panel");
+  expect(has(app.texts(), "常见错误")).toBe(true);
+
+  // 帮助打开期间不能落子，倒计时也不走
+  await app.press("id:cell-7-7");
+  await app.clock.fastForward(90000);
+  expect(has(app.texts(), "0 手")).toBe(true);
+  expect(has(app.texts(), "已替你落子")).toBe(false);
+
+  await app.press("id:help-close");
+  await app.waitUntil(() => !app.shows("id:help-panel"));
+  // 关掉帮助后回到对局菜单，再关菜单才开始计时
+  expect(app.shows("id:menu-close")).toBe(true);
+  await app.press("id:menu-close");
+  await app.clock.runFor(600);
+  expect(has(app.texts(), "0 手")).toBe(true);
+  expect(has(app.texts(), "已替你落子")).toBe(false);
+});
+
+test("地狱难度会用于新对局并写入设置", async () => {
+  const app = await launch();
+  await app.press("id:seg-hell");
+  await app.press("id:home-new");
+  await app.waitFor("id:cell-7-7");
+  expect(has(app.texts(), "人机 · 地狱")).toBe(true);
+  await app.waitUntil(() => {
+    const raw = app.storage()["gomoku.v2"];
+    return raw !== undefined && JSON.parse(raw).level === "hell";
+  });
+});
+
 test("主页的对战设置会用于新对局", async () => {
   const app = await launch();
   await app.press("id:seg-hard");

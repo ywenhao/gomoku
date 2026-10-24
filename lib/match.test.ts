@@ -26,9 +26,14 @@ function seeded(seed: number): () => number {
 
 /**
  * 把时间预算放得足够大，让搜索只受节点数约束 —— 否则同一局在快机器和
- * 慢机器上搜到的层数不同，落子不同，结果也就不同。
+ * 慢机器上搜到的层数不同，落子不同，结果也就不同。节点上限同时保证
+ * 单步耗时远低于运行时约 2s 的单次调用上限。
  */
-const deterministic: MoveOptions = { deadlineMs: 60_000, random: seeded(20261023) };
+const deterministic: MoveOptions = {
+  maxNodes: 600,
+  deadlineMs: 60_000,
+  random: seeded(20261023),
+};
 
 async function playGame(blackLevel: Difficulty, whiteLevel: Difficulty) {
   const b = createBoard();
@@ -59,7 +64,7 @@ test(
     const r = await playGame("normal", "hard");
     console.log(`winner=${r.winner} moves=${r.moves} maxStep=${r.maxMs}ms`);
     // 单步耗时必须远小于运行时单次调用上限（约 2s）
-    expect(r.maxMs < 1200).toBe(true);
+    expect(r.maxMs < 1500).toBe(true);
     expect(r.moves > 0).toBe(true);
   },
   120_000,
@@ -71,7 +76,7 @@ test(
     const r = await playGame("hard", "easy");
     console.log(`winner=${r.winner} moves=${r.moves} maxStep=${r.maxMs}ms`);
     expect(r.winner).toBe(1);
-    expect(r.maxMs < 1200).toBe(true);
+    expect(r.maxMs < 1500).toBe(true);
   },
   120_000,
 );

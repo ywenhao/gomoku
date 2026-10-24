@@ -56,8 +56,22 @@ function longestRun(b: readonly number[], p: Player): number {
   return best;
 }
 
-/* ------------------------------ 规则 ------------------------------ */
+/** 某方下一手能直接成五的落点数量；≥2 即活四/双四。 */
+function winningSpots(board: readonly number[], p: Player): number {
+  const b = board.slice();
+  let n = 0;
+  for (let i = 0; i < b.length; i++) {
+    if (b[i] !== 0) continue;
+    const x = i % 15;
+    const y = (i - x) / 15;
+    b[i] = p;
+    if (findWinLine(b, x, y, p) !== null) n++;
+    b[i] = 0;
+  }
+  return n;
+}
 
+/* ------------------------------ 规则 ------------------------------ */
 test("横向五连判胜", () => {
   const b = createBoard();
   for (let x = 3; x <= 7; x++) b[idx(x, 5)] = 1;
@@ -154,8 +168,11 @@ test("AI 堵住唯一成五点", () => {
     EMPTY,
     EMPTY,
   ]);
-  for (const level of ["normal", "hard"] as Difficulty[]) {
-    const mv = findBestMove(b, 2, level)!;
+  for (const level of ["normal", "hard", "hell"] as Difficulty[]) {
+    const mv = findBestMove(b, 2, level, {
+      deadlineMs: 300,
+      maxNodes: 6000,
+    })!;
     expect(`${level}:${mv.x},${mv.y}`).toBe(`${level}:7,7`);
   }
 });
@@ -179,10 +196,85 @@ test("AI 不会漏掉自己的活四机会", () => {
     EMPTY,
     EMPTY,
   ]);
-  const mv = findBestMove(b, 2, "hard")!;
-  const nb = b.slice();
-  nb[idx(mv.x, mv.y)] = 2;
-  expect(longestRun(nb, 2) >= 4).toBe(true);
+  for (const level of ["hard", "hell"] as Difficulty[]) {
+    const mv = findBestMove(b, 2, level, {
+      deadlineMs: 300,
+      maxNodes: 6000,
+    })!;
+    const nb = b.slice();
+    nb[idx(mv.x, mv.y)] = 2;
+    expect(longestRun(nb, 2) >= 4).toBe(true);
+    expect(winningSpots(nb, 2) >= 2).toBe(true);
+  }
+});
+
+test("AI 会封堵对手的活三，不让它变成活四", () => {
+  const b = parse([
+    EMPTY,
+    EMPTY,
+    EMPTY,
+    EMPTY,
+    EMPTY,
+    EMPTY,
+    EMPTY,
+    "....XXX........",
+    EMPTY,
+    EMPTY,
+    EMPTY,
+    EMPTY,
+    EMPTY,
+    "..O............",
+    EMPTY,
+  ]);
+  for (const level of ["hard", "hell"] as Difficulty[]) {
+    const mv = findBestMove(b, 2, level, {
+      deadlineMs: 400,
+      maxNodes: 6000,
+    })!;
+    expect(mv.y).toBe(7);
+    expect(`${level}:${mv.x === 3 || mv.x === 7}`).toBe(`${level}:true`);
+  }
+});
+
+test("AI 能识别并防住对手的双四", () => {
+  // 黑棋横三 + 竖三：再下 (8,7) 会同时在横线和竖线做成两个四
+  const board = createBoard();
+  for (const x of [5, 6, 7]) board[idx(x, 7)] = 1;
+  for (const y of [3, 4, 5]) board[idx(8, y)] = 1;
+  // 白棋封住左端和下端，避免这两条线本来就是活四
+  board[idx(4, 7)] = 2;
+  board[idx(8, 2)] = 2;
+  board[idx(0, 0)] = 2;
+
+  for (const level of ["hard", "hell"] as Difficulty[]) {
+    const mv = findBestMove(board, 2, level, {
+      deadlineMs: 400,
+      maxNodes: 6000,
+    })!;
+    // 只有占住双四的交叉点（或先堵住其中一条线）才算有效防守
+    const safe =
+      (mv.x === 8 && mv.y === 7) ||
+      (mv.x === 8 && mv.y === 6) ||
+      (mv.x === 9 && mv.y === 7);
+    expect(`${level}:${safe}`).toBe(`${level}:true`);
+  }
+});
+
+test("地狱档会拆掉对手的连续冲四（VCF）", () => {
+  // 黑棋先下 (8,7)：横线冲四逼白棋堵 (9,7)，随后 (8,6) 做成活四。
+  // 白棋必须提前占住 (8,7) 或 (8,6)，光堵 (9,7) 来不及。
+  const board = createBoard();
+  for (const x of [5, 6, 7]) board[idx(x, 7)] = 1;
+  for (const y of [4, 5]) board[idx(8, y)] = 1;
+  board[idx(4, 7)] = 2;
+  board[idx(0, 0)] = 2;
+
+  const mv = findBestMove(board, 2, "hell", {
+    deadlineMs: 700,
+    maxNodes: 10000,
+  })!;
+  const safe = (mv.x === 8 && mv.y === 7) || (mv.x === 8 && mv.y === 6);
+  expect(`hell:${safe}`).toBe("hell:true");
 });
 
 test("空棋盘落在天元", () => {
@@ -194,8 +286,11 @@ test("AI 落子始终合法", () => {
   const b = createBoard();
   b[idx(7, 7)] = 1;
   b[idx(8, 8)] = 2;
-  for (const level of ["easy", "normal", "hard"] as Difficulty[]) {
-    const mv = findBestMove(b, 1, level)!;
+  for (const level of ["easy", "normal", "hard", "hell"] as Difficulty[]) {
+    const mv = findBestMove(b, 1, level, {
+      deadlineMs: 200,
+      maxNodes: 3000,
+    })!;
     expect(b[idx(mv.x, mv.y)]).toBe(0);
     expect(mv.x >= 0 && mv.x < 15 && mv.y >= 0 && mv.y < 15).toBe(true);
   }
@@ -225,4 +320,22 @@ test("hard 档单步耗时可控", () => {
   expect(mv !== null).toBe(true);
   // QuickJS 下留足余量；实际通常在 100~400ms
   expect(dt < 2000).toBe(true);
+});
+
+test("hell 档在限定预算内返回合法落子", () => {
+  const b = createBoard();
+  const seq: [number, number, Player][] = [
+    [7, 7, 1], [7, 8, 2], [6, 7, 1], [8, 8, 2], [8, 7, 1], [6, 8, 2],
+    [5, 6, 1], [9, 9, 2], [9, 6, 1], [5, 8, 2], [4, 7, 1], [10, 7, 2],
+    [6, 5, 1], [8, 10, 2],
+  ];
+  for (const [x, y, p] of seq) b[idx(x, y)] = p;
+
+  const t0 = Date.now();
+  const mv = findBestMove(b, 1, "hell", { deadlineMs: 500, maxNodes: 8000 })!;
+  const dt = Date.now() - t0;
+  expect(mv !== null).toBe(true);
+  expect(b[idx(mv.x, mv.y)]).toBe(0);
+  // 单次调用必须明显低于 QuickJS 约 2s 的执行上限
+  expect(dt < 1900).toBe(true);
 });

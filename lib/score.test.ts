@@ -80,6 +80,7 @@ test("难度决定基础分", () => {
   expect(base("easy")).toBe(100);
   expect(base("normal")).toBe(180);
   expect(base("hard")).toBe(300);
+  expect(base("hell")).toBe(500);
 });
 
 test("文案与格式化", () => {

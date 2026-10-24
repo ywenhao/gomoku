@@ -7,6 +7,7 @@ const LEVEL_NAME: Record<Difficulty, string> = {
   easy: "简单",
   normal: "普通",
   hard: "困难",
+  hell: "地狱",
 };
 
 /** 结算文案：按结果和星级给不同的情绪反馈 */

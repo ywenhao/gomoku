@@ -13,6 +13,7 @@ const LEVELS: readonly { key: Difficulty; label: string }[] = [
   { key: "easy", label: "简单" },
   { key: "normal", label: "普通" },
   { key: "hard", label: "困难" },
+  { key: "hell", label: "地狱" },
 ];
 
 const LIMITS: readonly { key: string; label: string }[] = [
@@ -24,6 +25,7 @@ const LEVEL_NAME: Record<Difficulty, string> = {
   easy: "简单",
   normal: "普通",
   hard: "困难",
+  hell: "地狱",
 };
 
 function SectionTitle(props: { text: string }) {
@@ -70,6 +72,7 @@ export function Home(props: {
   onLevel: (l: Difficulty) => void;
   onLimit: (on: boolean) => void;
   onSound: () => void;
+  onHelp: () => void;
   onExit: () => void;
 }) {
   return (
@@ -282,6 +285,32 @@ export function Home(props: {
           >
             设置用于新对局；「继续游戏」沿用存档里的模式与难度。
           </Text>
+
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginTop: 14,
+              paddingTop: 13,
+              borderTopWidth: 1,
+              borderColor: C.line,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: C.ink }}>玩法与帮助</Text>
+              <Text style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                规则、棋型、开局布局与攻防顺序
+              </Text>
+            </View>
+            <PressButton
+              label="查看帮助"
+              hint="打开五子棋规则与基础教学"
+              testID="home-help"
+              onPress={props.onHelp}
+            />
+          </View>
 
           <View
             style={{

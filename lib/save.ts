@@ -110,7 +110,10 @@ export function readSavedGame(raw: string | null): SavedGame | null {
   const now = Date.now();
   const mode: Mode = data.mode === "pvp" ? "pvp" : "pve";
   const level: Difficulty =
-    data.level === "easy" || data.level === "hard"
+    data.level === "easy" ||
+    data.level === "normal" ||
+    data.level === "hard" ||
+    data.level === "hell"
       ? data.level
       : "normal";
 

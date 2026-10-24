@@ -37,6 +37,12 @@ test("合法存档能读出全部字段，并由手数推出轮到谁", () => {
   expect(savedTurn(game)).toBe(2);
 });
 
+test("地狱难度能写进存档并原样读回", () => {
+  const game = readSavedGame(JSON.stringify(saved({ level: "hell" })));
+  expect(game).not.toBe(null);
+  expect(game!.level).toBe("hell");
+});
+
 test("空档、坏 JSON、空棋局都当没有存档", () => {
   expect(readSavedGame(null)).toBe(null);
   expect(readSavedGame("")).toBe(null);

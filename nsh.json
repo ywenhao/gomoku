@@ -1,8 +1,8 @@
 {
   "name": "五子棋",
   "id": "com.gomoku.app",
-  "version": "1.2.0",
-  "build": 3,
+  "version": "1.3.0",
+  "build": 4,
   "icon": "icon.png",
   "appearance": "light",
   "capabilities": {

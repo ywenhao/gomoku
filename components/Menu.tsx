@@ -13,6 +13,7 @@ const LEVELS: readonly { key: Difficulty; label: string }[] = [
   { key: "easy", label: "简单" },
   { key: "normal", label: "普通" },
   { key: "hard", label: "困难" },
+  { key: "hell", label: "地狱" },
 ];
 
 const LIMITS: readonly { key: string; label: string }[] = [
@@ -24,6 +25,7 @@ const LEVEL_NAME: Record<Difficulty, string> = {
   easy: "简单",
   normal: "普通",
   hard: "困难",
+  hell: "地狱",
 };
 
 function SectionTitle(props: { text: string }) {
@@ -92,6 +94,7 @@ export function MenuPanel(props: {
   onLimit: (on: boolean) => void;
   onSound: () => void;
   onHome: () => void;
+  onHelp: () => void;
   onExit: () => void;
   onClear: () => void;
   onClose: () => void;
@@ -285,6 +288,12 @@ export function MenuPanel(props: {
         <SectionTitle text="游戏" />
         <View style={{ gap: 9 }}>
           <PressButton
+            label="玩法与帮助"
+            hint="查看规则、棋型、开局布局与攻防顺序"
+            testID="menu-help"
+            onPress={props.onHelp}
+          />
+          <PressButton
             label="返回游戏菜单"
             hint="保存当前对局，下次从这里继续"
             testID="menu-home"
@@ -415,7 +424,7 @@ export function MenuPanel(props: {
             lineHeight: 17,
           }}
         >
-          计分：胜利基础分随难度（100 / 180 / 300），另加速度、效率与连胜奖励；
+          计分：胜利基础分随难度（100 / 180 / 300 / 500），另加速度、效率与连胜奖励；
           悔棋 −15、超时 −10。清空记录会同时重置总分、最高分与连胜。
         </Text>
       </Scroll>

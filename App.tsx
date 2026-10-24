@@ -13,6 +13,7 @@ import { SafeAreaView } from "nsh/base";
 import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";
 import { Board } from "./components/Board";
+import { HelpPanel } from "./components/Help";
 import { Home } from "./components/Home";
 import { MenuPanel } from "./components/Menu";
 import { ResultPanel } from "./components/Result";
@@ -69,6 +70,7 @@ const LEVEL_NAME: Record<Difficulty, string> = {
   easy: "简单",
   normal: "普通",
   hard: "困难",
+  hell: "地狱",
 };
 
 /** 落盘的进度（分数 + 战绩 + 设置） */
@@ -153,6 +155,7 @@ function App() {
   const startedAt = signal(0);
 
   const menu = signal(false);
+  const helpOpen = signal(false);
   const settle = signal<Settle | null>(null);
   const resultOpen = signal(false);
   const notice = signal<string | null>(null);
@@ -196,6 +199,7 @@ function App() {
       over() === null &&
       !thinking() &&
       !menu() &&
+      !helpOpen() &&
       !resultOpen() &&
       (mode() === "pvp" || turn() === HUMAN),
   );
@@ -594,7 +598,12 @@ function App() {
               ? (JSON.parse(raw) as Record<string, unknown>)
               : {};
             const lv = meta.level;
-            if (lv === "easy" || lv === "normal" || lv === "hard") {
+            if (
+              lv === "easy" ||
+              lv === "normal" ||
+              lv === "hard" ||
+              lv === "hell"
+            ) {
               level.set(lv);
             }
             const md = meta.mode;
@@ -697,7 +706,7 @@ function App() {
   effect(() => {
     const s = secondsLeft();
     const active = timed();
-    const paused = (menu() && localMode()) || resultOpen();
+    const paused = (menu() && localMode()) || resultOpen() || helpOpen();
     if (!active || paused || over() !== null) return;
     if (s > URGENT_SECONDS || s <= 0) {
       tickedSecond = 0;
@@ -712,7 +721,7 @@ function App() {
   // 将来的联网模式不在 LOCAL_MODES 里，倒计时会继续走。
   effect(() => {
     const active = timed();
-    const paused = (menu() && localMode()) || resultOpen();
+    const paused = (menu() && localMode()) || resultOpen() || helpOpen();
     const r = round();
 
     if (!active) {
@@ -760,8 +769,9 @@ function App() {
     const o = over();
     const lv = level();
     const sc = screen();
+    const help = helpOpen();
 
-    if (sc !== "game" || m !== "pve" || o !== null || t !== AI) {
+    if (sc !== "game" || m !== "pve" || o !== null || t !== AI || help) {
       thinking.set(false);
       return;
     }
@@ -771,6 +781,7 @@ function App() {
       if (untracked(() => round()) !== r) return;
       if (untracked(() => over()) !== null) return;
       if (untracked(() => turn()) !== AI) return;
+      if (untracked(() => helpOpen())) return;
 
       let choice: AiChoice | null = null;
       try {
@@ -789,6 +800,7 @@ function App() {
 
       if (untracked(() => round()) !== r) return;
       if (untracked(() => over()) !== null) return;
+      if (untracked(() => helpOpen())) return;
       thinking.set(false);
 
       if (choice) {
@@ -814,15 +826,33 @@ function App() {
   effect(() => {
     return keymap.bind({
       u: () => {
-        if (screen() === "game" && !menu() && !resultOpen()) undo();
+        if (
+          screen() === "game" &&
+          !menu() &&
+          !helpOpen() &&
+          !resultOpen()
+        ) {
+          undo();
+        }
       },
       r: () => {
-        if (screen() === "game" && !menu() && !resultOpen()) reset();
+        if (
+          screen() === "game" &&
+          !menu() &&
+          !helpOpen() &&
+          !resultOpen()
+        ) {
+          reset();
+        }
       },
       m: () => {
-        if (screen() === "game") menu.update((v) => !v);
+        if (screen() === "game" && !helpOpen()) menu.update((v) => !v);
       },
       escape: () => {
+        if (helpOpen()) {
+          helpOpen.set(false);
+          return;
+        }
         if (screen() !== "game") return;
         if (menu()) menu.set(false);
         else if (resultOpen()) resultOpen.set(false);
@@ -855,6 +885,7 @@ function App() {
             onLevel={(l) => level.set(l)}
             onLimit={(on) => limitOn.set(on)}
             onSound={toggleSound}
+            onHelp={() => helpOpen.set(true)}
             onExit={exitGame}
           />
         </If>
@@ -1127,6 +1158,7 @@ function App() {
           onLimit={switchLimit}
           onSound={toggleSound}
           onHome={goHome}
+          onHelp={() => helpOpen.set(true)}
           onExit={exitGame}
           onClear={clearHistory}
           onClose={() => menu.set(false)}
@@ -1149,6 +1181,11 @@ function App() {
           onClose={() => resultOpen.set(false)}
           onRestart={reset}
         />
+      </If>
+
+      {/* 帮助：在主页与对局菜单都能打开，覆盖在最上层 */}
+      <If when={helpOpen()}>
+        <HelpPanel onClose={() => helpOpen.set(false)} />
       </If>
     </SafeAreaView>
   );
