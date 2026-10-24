@@ -518,30 +518,34 @@ export function HelpPanel(props: { kind?: GameKind; onClose: () => void }) {
         onPress={props.onClose}
       />
 
-      <Scroll
+      <View
         testID="help-panel"
         style={{
           width: "100%",
           maxWidth: 450,
-          maxHeight,
+          height: maxHeight,
           backgroundColor: C.panel,
           borderRadius: 22,
           borderWidth: 1,
           borderColor: C.line,
           boxShadow: "0 24px 60px rgba(40,26,12,0.34)",
-        }}
-        contentStyle={{
-          paddingHorizontal: 18,
-          paddingTop: 16,
-          paddingBottom: 20,
+          overflow: "hidden",
         }}
       >
         <View
+          testID="help-header"
           style={{
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "space-between",
             gap: 12,
+            paddingHorizontal: 18,
+            paddingTop: 16,
+            paddingBottom: 13,
+            backgroundColor: C.panel,
+            borderBottomWidth: 1,
+            borderBottomColor: C.line,
+            zIndex: 1,
           }}
         >
           <View>
@@ -567,65 +571,77 @@ export function HelpPanel(props: { kind?: GameKind; onClose: () => void }) {
           />
         </View>
 
-        <View
-          style={{
-            flexDirection: "row",
-            flexWrap: "wrap",
-            gap: 6,
-            marginTop: 12,
+        <Scroll
+          testID="help-scroll"
+          style={{ width: "100%", flex: 1 }}
+          contentStyle={{
+            paddingHorizontal: 18,
+            paddingTop: 14,
+            paddingBottom: 20,
           }}
         >
-          <Each of={GAMES}>
-            {(g) => (
-              <PressButton
-                label={g().name}
-                testID={`help-tab-${g().kind}`}
-                tone={active() === g().kind ? "primary" : "default"}
-                onPress={() => active.set(g().kind)}
-              />
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              gap: 6,
+              marginTop: 12,
+            }}
+          >
+            <Each of={GAMES}>
+              {(g) => (
+                <PressButton
+                  label={g().name}
+                  testID={`help-tab-${g().kind}`}
+                  tone={active() === g().kind ? "primary" : "default"}
+                  onPress={() => active.set(g().kind)}
+                />
+              )}
+            </Each>
+          </View>
+          <Text
+            style={{ color: C.ink, fontSize: 14, lineHeight: 22, marginTop: 14 }}
+          >
+            {GUIDES[active()].intro}
+          </Text>
+          <Each of={GUIDES[active()].rules}>
+            {(r) => (
+              <Section title={r().title}>
+                <Para>{r().text}</Para>
+              </Section>
             )}
           </Each>
-        </View>
-        <Text
-          style={{ color: C.ink, fontSize: 14, lineHeight: 22, marginTop: 14 }}
-        >
-          {GUIDES[active()].intro}
-        </Text>
-        <Each of={GUIDES[active()].rules}>
-          {(r) => (
-            <Section title={r().title}>
-              <Para>{r().text}</Para>
-            </Section>
-          )}
-        </Each>
-        <Section title="快棋、加秒和读秒是什么？">
-          <Para>
-            快棋、超快棋表示比赛用时长短，不是 AI
-            难度。想从容思考可选更长的主时间；熟悉规则后再尝试较短时限。每方的时间分别计算，选好时限后再开始新对局。
-          </Para>
-          <Each of={TIME_CONTROLS[active()]}>
-            {(t) => (
-              <View style={{ gap: 5, marginTop: 8 }}>
-                <Text style={{ color: C.ink, fontSize: 12, fontWeight: "600" }}>
-                  {t().label}
-                </Text>
-                <Para>{describeTimeControl(t())}</Para>
-              </View>
-            )}
-          </Each>
-        </Section>
-        <Section title="操作引导">
-          <Each of={GUIDES[active()].steps}>
-            {(text, i) => (
-              <Para>
-                {i() + 1}. {text()}
-              </Para>
-            )}
-          </Each>
-        </Section>
-        <Para>规则参考：{GUIDES[active()].source}</Para>
-        {go() ? <GoHelp /> : active() === "gomoku" ? <GomokuHelp /> : null}
-      </Scroll>
+          <Section title="快棋、加秒和读秒是什么？">
+            <Para>
+              快棋、超快棋表示比赛用时长短，不是 AI
+              难度。想从容思考可选更长的主时间；熟悉规则后再尝试较短时限。每方的时间分别计算，选好时限后再开始新对局。
+            </Para>
+            <Each of={TIME_CONTROLS[active()]}>
+              {(t) => (
+                <View style={{ gap: 5, marginTop: 8 }}>
+                  <Text
+                    style={{ color: C.ink, fontSize: 12, fontWeight: "600" }}
+                  >
+                    {t().label}
+                  </Text>
+                  <Para>{describeTimeControl(t())}</Para>
+                </View>
+              )}
+            </Each>
+          </Section>
+          <Section title="操作引导">
+            <Each of={GUIDES[active()].steps}>
+              {(text, i) => (
+                <Para>
+                  {i() + 1}. {text()}
+                </Para>
+              )}
+            </Each>
+          </Section>
+          <Para>规则参考：{GUIDES[active()].source}</Para>
+          {go() ? <GoHelp /> : active() === "gomoku" ? <GomokuHelp /> : null}
+        </Scroll>
+      </View>
     </View>
   );
 }

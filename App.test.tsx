@@ -370,6 +370,11 @@ test("主页帮助展示规则、棋型与开局说明", async () => {
   expect(has(texts, "天元")).toBe(true);
   expect(app.shows("id:help-close")).toBe(true);
 
+  // 正文滚动时，标题和关闭按钮固定在弹窗顶部。
+  await app.scroll("id:help-scroll", 600);
+  expect(app.shows("id:help-header")).toBe(true);
+  expect(app.shows("id:help-close")).toBe(true);
+
   await app.press("id:help-close");
   await app.waitUntil(() => !app.shows("id:help-panel"));
   expect(app.shows("id:home-new")).toBe(true);
