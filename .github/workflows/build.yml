@@ -75,9 +75,22 @@ jobs:
         shell: pwsh
         run: |
           # 压缩目录内容而不是目录本身，解压后直接看到 exe 和 nsh/。
-          Compress-Archive `
-            -Path "dist/windows/弈境/*" `
-            -DestinationPath "dist/windows/yijing-windows-x64.zip"
+          # Compress-Archive 不会给中文文件名写入 UTF-8 标记，跨平台解压会乱码；
+          # .NET 的 CreateFromDirectory 会正确编码，并且 includeBaseDirectory=false
+          # 刚好不会额外嵌套「弈境」目录。
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $source = (Resolve-Path "dist/windows/弈境").Path
+          $output = (Resolve-Path "dist/windows").Path
+          $destination = Join-Path $output "yijing-windows-x64.zip"
+          if (Test-Path -LiteralPath $destination) {
+            Remove-Item -LiteralPath $destination -Force
+          }
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            $source,
+            $destination,
+            [System.IO.Compression.CompressionLevel]::Optimal,
+            $false
+          )
       - uses: actions/upload-artifact@v7
         with:
           name: yijing-windows-x64
