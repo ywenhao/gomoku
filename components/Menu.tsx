@@ -1,10 +1,8 @@
 import { Scroll, Text, View, effect, signal } from "nsh";
 import { windowSize } from "nsh/device";
-import { C, PressButton, Segmented } from "./ui";
+import { C, ConfirmButton, PressButton, Segmented } from "./ui";
 import { formatDuration, formatStamp, type GameRecord } from "../lib/score";
-import type { Difficulty } from "../lib/gomoku";
-
-type Mode = "pve" | "pvp";
+import type { Difficulty, Mode } from "../lib/gomoku";
 
 const MODES: readonly { key: Mode; label: string }[] = [
   { key: "pve", label: "人机" },
@@ -88,9 +86,13 @@ export function MenuPanel(props: {
   mode: Mode;
   level: Difficulty;
   limitOn: boolean;
+  soundOn: boolean;
   onMode: (m: Mode) => void;
   onLevel: (l: Difficulty) => void;
   onLimit: (on: boolean) => void;
+  onSound: () => void;
+  onHome: () => void;
+  onExit: () => void;
   onClear: () => void;
   onClose: () => void;
 }) {
@@ -263,6 +265,38 @@ export function MenuPanel(props: {
               compact
             />
           </View>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <Text style={{ fontSize: 13.5, color: C.ink }}>声音</Text>
+            <PressButton
+              label={props.soundOn ? "开" : "关"}
+              hint={props.soundOn ? "关闭声音" : "打开声音"}
+              testID="menu-sound"
+              onPress={props.onSound}
+            />
+          </View>
+        </View>
+
+        <SectionTitle text="游戏" />
+        <View style={{ gap: 9 }}>
+          <PressButton
+            label="返回游戏菜单"
+            hint="保存当前对局，下次从这里继续"
+            testID="menu-home"
+            onPress={props.onHome}
+          />
+          <ConfirmButton
+            label="退出游戏"
+            confirmLabel="再点一次，确认退出"
+            hint="保存当前对局并关闭应用"
+            testID="menu-exit"
+            onConfirm={props.onExit}
+          />
         </View>
 
         <SectionTitle text={`历史战绩（${props.history.length} 局）`} />

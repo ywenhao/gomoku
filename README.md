@@ -6,19 +6,32 @@ Direct2D / Android View / UIKit / HTML），不是 WebView 套壳。
 
 ## 玩法
 
+- 启动后先到**游戏菜单**：继续上一局、开新局、切模式 / 难度 / 限时、开关声音、退出游戏。
 - 15×15 棋盘，无禁手，五子连珠即胜（横、竖、两条斜线）。
 - **人机对战**：你执黑先行，AI 执白。难度分「简单 / 普通 / 困难」。
 - **双人对战**：同一台设备轮流落子（不计分，只记战绩）。
 - 悔棋、重新开始；人机模式下悔棋会一次退回「你 + AI」两步。
 - 最后一手有红点标记，五连的子会红圈脉冲提示。
-- 落子、最后 5 秒滴答、超时、胜 / 负 / 和结算都有音效；音频由代码合成，不打包音频资源。
+- 落子、最后 5 秒滴答、超时、胜 / 负 / 和结算都有音效；音频由代码合成，不打包音频资源，可在游戏菜单里关掉。
 - 桌面端鼠标悬停显示半透明落子预览；快捷键 `U` 悔棋、`R` 重开、`M` 菜单、`Esc` 关闭浮层。
+
+## 游戏菜单与继续游戏
+
+主页就是游戏菜单，不会一进来就把棋盘推到你面前：
+
+- 有未下完的对局时显示**「继续游戏」**，并标出模式、手数和剩余时间；没有存档时只显示「开始新对局」。
+- 「开始新对局」使用主页当前的对战模式 / AI 难度 / 限时设置；「继续游戏」沿用存档里的设置，不受主页后来改动影响。
+- 对局中打开菜单可以**「返回游戏菜单」**，当前棋盘会先保存；下次进来点「继续游戏」立即恢复，不用重新下。
+- **「退出游戏」需要连点两次确认**；确认后先把设置和对局写入 storage，再请求宿主关闭应用。直接关窗口或进程被杀时，也能靠持续自动存档回到上一手附近。
+- 声音开关同时存在于主页和对局菜单，状态随设置一起保存。
+
+存档时机：每次落子、悔棋、切换设置后写一次；对局中每 5 秒刷新一次剩余时间；结算、重新开始或开新局时清掉未完成存档。
 
 ## 菜单、计分与结算
 
 **菜单**（右上角「菜单」，或 `M`）里能看到总分、单局最高、连胜、总局数与胜平负，
-也能改对战模式 / AI 难度 / 限时开关，并查看最近 40 局的战绩（结果、难度、手数、用时、
-时间、单局得分、星级）。「清空全部记录」需要连点两次确认，4 秒不点自动取消，清空后
+也能改对战模式 / AI 难度 / 限时开关 / 声音，并查看最近 40 局的战绩（结果、难度、手数、用时、
+时间、单局得分、星级）。底部还有「返回游戏菜单」和「退出游戏」。「清空全部记录」需要连点两次确认，4 秒不点自动取消，清空后
 总分、最高分、连胜一起归零。
 
 **单局得分**（`lib/score.ts`，纯函数、可单测）：
@@ -53,23 +66,26 @@ Direct2D / Android View / UIKit / HTML），不是 WebView 套壳。
 
 ```
 gomoku/
-├── App.tsx              入口：状态、计分、倒计时、AI 调度、页面布局
+├── App.tsx              入口：主页 / 对局状态、计分、倒计时、AI 调度、存档
 ├── components/
+│   ├── Home.tsx         启动页 / 游戏菜单：继续、新局、设置、声音、退出
 │   ├── Board.tsx        棋盘：Canvas 画木纹/网格/星位 + 225 个可点击交叉点
-│   ├── Menu.tsx         菜单：统计、设置、历史战绩、清空记录
+│   ├── Menu.tsx         对局菜单：统计、设置、声音、返回主页、退出
 │   ├── Result.tsx       结算浮层：星级/分数滚动/计分明细/连胜徽章
 │   ├── Sound.tsx        隐藏的音效播放器（每个音效一个 Video）
-│   └── ui.tsx           按钮、分段控件、棋子圆点
+│   └── ui.tsx           按钮、二次确认按钮、分段控件、棋子圆点
 ├── lib/
 │   ├── gomoku.ts        纯规则：落子、胜负判定、和棋
 │   ├── score.ts         计分规则、格式化、战绩类型
+│   ├── save.ts          未完成对局的存档格式与校验
 │   ├── ai.ts            AI：启发式评分 + alpha-beta 搜索
 │   ├── sound.ts         代码合成 WAV 音效（落子/滴答/超时/胜负和）
 │   ├── ai.test.ts       规则与 AI 单元测试
 │   ├── score.test.ts    计分规则单元测试
+│   ├── save.test.ts     存档校验与轮次推导测试
 │   ├── sound.test.ts    WAV 头、时长与峰值测试
 │   └── match.test.ts    自对弈回归（强度与单步耗时）
-├── App.test.tsx         界面流程测试（落子、悔棋、重开、判胜、菜单、计分、倒计时、音效）
+├── App.test.tsx         界面流程测试（主页、继续、落子、悔棋、重开、判胜、菜单、计分、倒计时、音效）
 ├── nsh.json             应用名、id、版本、图标、亮色外观与能力（版本号的唯一来源）
 ├── package.json         只有 scripts，没有依赖：命令别名 + 版本号镜像
 ├── scripts/
@@ -96,7 +112,7 @@ nsh 命令 —— **`npm` 只是别名，不是依赖**，项目没有 `dependen
 | `npm run dev:android` | `nsh run . --target android` | 需要已启动的模拟器或已连接的设备 |
 | `npm run dev:ios` | `nsh run . --target ios` | 仅 macOS + Xcode 可用 |
 | `npm run check` | `nsh check` | TypeScript 类型检查 |
-| `npm test` | `nsh test` | 全部 43 个测试 |
+| `npm test` | `nsh test` | 全部 55 个测试 |
 | `npm test -- lib/score.test.ts` | `nsh test lib/score.test.ts` | 只跑一个文件 |
 | `npm run verify` | `nsh check` + `nsh test` | 提交前跑一遍 |
 | `npm run build` | `nsh build .` | 编译成 QuickJS 字节码，不打包 |
@@ -131,11 +147,13 @@ nsh test lib/score.test.ts
 nsh check                # TypeScript 类型检查
 ```
 
-界面测试通过 `testID` 驱动：`cell-x-y`、`stone-x-y-b`、`undo`、`restart`、
+界面测试通过 `testID` 驱动：`home-new`、`home-continue`、`home-sound`、`home-exit`、
+`menu-home`、`menu-exit`、`menu-sound`、`cell-x-y`、`stone-x-y-b`、`undo`、`restart`、
 `open-menu`、`menu-close`、`seg-pve` / `seg-hard` / `seg-on`、`clear-history`、
 `timer-text`、`timer-track` / `timer-urgent`、`sound-place` 等、`result-restart`、
 `result-close`。倒计时用 `open(..., { clock: {} })` 的手动时钟 +
 `app.clock.fastForward(30000)` 测，不需要真等 30 秒。
+用同一个 storage 再 `open` 一次可以模拟关掉应用后重新启动，验证「继续游戏」。
 `--target windows` / `--target web` 还能在真实平台上跑并截图。
 
 ## 打包
@@ -164,7 +182,7 @@ PR 和手动触发时跑六个 job：
 
 | Job | Runner | 产物 |
 | --- | --- | --- |
-| 类型检查与测试 | `ubuntu-24.04` | `nsh check` + 43 个测试 |
+| 类型检查与测试 | `ubuntu-24.04` | `nsh check` + 55 个测试 |
 | Windows x64 | `windows-2025` | `gomoku-windows-x64.zip` |
 | Linux x64 | `ubuntu-24.04` | `gomoku-linux-x64.tar.gz` |
 | macOS arm64 | `macos-26` | `gomoku-macos-arm64.zip` |
@@ -232,7 +250,7 @@ npm run release          # 打 tag 并推送，剩下的交给 CI
   这里不能用 `file://`：声明了 `capabilities` 后，nsh 的媒体地址检查只放行
   http(s)、`asset:`、`data:` 和相对/绝对路径，`file://` 会被拒绝且没有声音。
 - 最后 5 秒每秒滴答一次，菜单暂停期间不补响；Web 在第一次触摸时静音预播一次，
-  避开浏览器的自动播放限制。
+  避开浏览器的自动播放限制。声音开关在触发前拦截，关掉后不再播放，状态随设置存档。
 
 **性能与内存**
 - 棋盘用一维 `number[]`，每次落子生成新数组（不可变），每个交叉点的棋子值用
@@ -245,10 +263,15 @@ npm run release          # 打 tag 并推送，剩下的交给 CI
 - 每子最多 225 手，`moves` 数组有上界；战绩最多 40 条，存档一次写一个 JSON。
 
 **存档与权限**
-- `nsh/storage` 里一个 key（`gomoku.v2`）：分数、最高分、连胜、胜平负、战绩、模式、
-  难度、限时开关。加载完成后才允许写入，避免开局用默认值覆盖旧记录；坏档直接忽略。
-- `nsh.json` 只声明两样能力：`fs.read` / `fs.write` 限定在 `${dataDir}`（写音效文件）
-  和 `statusBar`（亮色状态栏）；没有网络权限。
+- `nsh/storage` 两个 key：`gomoku.v2` 存分数、最高分、连胜、胜平负、战绩、模式、
+  难度、限时开关、声音开关；`gomoku.game.v1` 存未下完的对局（落子序列、模式、难度、
+  剩余时间、悔棋/超时次数、开局与保存时间）。棋盘和轮次分别由落子序列、手数奇偶重建，
+  不存派生状态，避免棋盘和记录对不上。
+- 对局每次落子 / 悔棋 / 改设置后写一次，进行中每 5 秒刷新剩余时间；「返回游戏菜单」和
+  「退出游戏」前再写一次。结算、重新开始、开新局会删掉未完成存档。加载完成后才允许写入，
+  避免开局用默认值覆盖旧记录；坏档直接忽略，不拦启动。
+- `nsh.json` 声明 `fs.read` / `fs.write` 限定在 `${dataDir}`（写音效文件）、
+  `process.exit`（退出按钮请求宿主关闭界面）和 `statusBar`（亮色状态栏）；没有网络权限。
 
 **跨平台**
 - 只用 `nsh` / `nsh/base` / `nsh/storage` / `nsh/keymap` / `nsh/device` 的跨平台 API；

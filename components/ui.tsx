@@ -1,4 +1,4 @@
-import { Text, View, type Accessor } from "nsh";
+import { Text, View, effect, signal, type Accessor } from "nsh";
 
 /** 全局配色：暖木色棋盘 + 纸感背景 */
 export const C = {
@@ -19,6 +19,7 @@ export function PressButton(props: {
   tone?: "default" | "primary";
   grow?: boolean;
   hint?: string;
+  subLabel?: string;
   testID?: string;
 }) {
   const primary = props.tone === "primary";
@@ -58,7 +59,62 @@ export function PressButton(props: {
       >
         {props.label}
       </Text>
+      <If when={props.subLabel}>
+        <Text
+          style={{
+            fontSize: 11,
+            fontWeight: "500",
+            color: primary ? "#e9dfd2" : C.muted,
+            marginTop: 3,
+            textAlign: "center",
+            fontVariant: ["tabular-nums"],
+          }}
+        >
+          {props.subLabel}
+        </Text>
+      </If>
     </View>
+  );
+}
+
+/** 需要连点两次才执行的按钮，用来防误触退出 / 清空。 */
+export function ConfirmButton(props: {
+  label: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  hint?: string;
+  tone?: "default" | "primary";
+  grow?: boolean;
+  testID?: string;
+  confirmMs?: number;
+}) {
+  const confirming = signal(false);
+
+  effect(() => {
+    if (!confirming()) return;
+    const timer = setTimeout(
+      () => confirming.set(false),
+      props.confirmMs ?? 4000,
+    );
+    return () => clearTimeout(timer);
+  });
+
+  return (
+    <PressButton
+      label={confirming() ? props.confirmLabel : props.label}
+      hint={confirming() ? "再点一次确认" : props.hint}
+      tone={props.tone}
+      grow={props.grow}
+      testID={props.testID}
+      onPress={() => {
+        if (!confirming()) {
+          confirming.set(true);
+          return;
+        }
+        confirming.set(false);
+        props.onConfirm();
+      }}
+    />
   );
 }
 

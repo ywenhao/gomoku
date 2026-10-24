@@ -9,6 +9,7 @@ export const WIN_LEN = 5;
 
 export type Player = 1 | 2;
 export type Difficulty = "easy" | "normal" | "hard";
+export type Mode = "pve" | "pvp";
 
 export interface Move {
   x: number;

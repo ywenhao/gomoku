@@ -13,6 +13,7 @@ import { SafeAreaView } from "nsh/base";
 import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";
 import { Board } from "./components/Board";
+import { Home } from "./components/Home";
 import { MenuPanel } from "./components/Menu";
 import { ResultPanel } from "./components/Result";
 import { SoundBank } from "./components/Sound";
@@ -27,9 +28,11 @@ import {
   other,
   type Difficulty,
   type GameResult,
+  type Mode,
   type Move,
   type Player,
 } from "./lib/gomoku";
+import { readSavedGame, savedTurn, type SavedGame } from "./lib/save";
 import {
   HISTORY_LIMIT,
   MOVE_SECONDS,
@@ -47,9 +50,14 @@ import { loadSounds, type SoundName } from "./lib/sound";
 const HUMAN: Player = 1;
 const AI: Player = 2;
 const SAVE_KEY = "gomoku.v2";
+const GAME_KEY = "gomoku.game.v1";
 const NO_LINE: number[] = [];
+/** 继续游戏时至少留 3 秒，避免一进来就超时 */
+const RESUME_FLOOR_MS = 3000;
+/** 对局进行中定期刷新剩余时间，降低被直接杀掉时的损失 */
+const GAME_SAVE_MS = 5000;
 
-type Mode = "pve" | "pvp";
+type Screen = "home" | "game";
 
 /** 本地对局（人机 / 双人）：菜单打开时暂停倒计时。将来加联网模式时不要放进来。 */
 const LOCAL_MODES: readonly Mode[] = ["pve", "pvp"];
@@ -149,6 +157,14 @@ function App() {
   const resultOpen = signal(false);
   const notice = signal<string | null>(null);
   const loaded = signal(false);
+  const screen = signal<Screen>("home");
+  const savedGame = signal<SavedGame | null>(null);
+  const soundOn = signal(true);
+
+  /** 倒计时 effect 的本地状态：跨继续游戏保留剩余时间 */
+  let deadline = 0;
+  let pausedLeft = 0;
+  let tickedSecond = 0;
 
   const soundSrc = signal<Partial<Record<SoundName, string>>>({});
   const soundPrime = signal(0);
@@ -176,6 +192,7 @@ function App() {
 
   const canPlay = computed(
     () =>
+      screen() === "game" &&
       over() === null &&
       !thinking() &&
       !menu() &&
@@ -186,6 +203,7 @@ function App() {
   /** 是否该给人倒计时（AI 回合、终局、关闭限时都不计时） */
   const timed = computed(
     () =>
+      screen() === "game" &&
       limitOn() &&
       over() === null &&
       (mode() === "pvp" || turn() === HUMAN),
@@ -221,6 +239,7 @@ function App() {
   }
 
   function playSound(name: SoundName) {
+    if (!soundOn()) return;
     sounds[name].update((n) => n + 1);
   }
 
@@ -439,16 +458,141 @@ function App() {
     });
   }
 
+  /** 当前对局快照；没开始或已结束返回 null（这时不该留「继续游戏」）。 */
+  function gameSnapshot(): SavedGame | null {
+    const m = moves();
+    if (m.length === 0 || over() !== null) return null;
+    return {
+      moves: m,
+      mode: mode(),
+      level: level(),
+      limitOn: limitOn(),
+      // 剩余时间每 100ms 变一次；不订阅它，否则存档会跟着倒计时狂写
+      leftMs: untracked(() => leftMs()),
+      undos: undos(),
+      timeouts: timeouts(),
+      startedAt: startedAt(),
+      savedAt: Date.now(),
+    };
+  }
+
+  function settingsJSON(): string {
+    return JSON.stringify({
+      ...progress(),
+      level: level(),
+      mode: mode(),
+      limitOn: limitOn(),
+      soundOn: soundOn(),
+    });
+  }
+
+  function writeGame(): Promise<void> {
+    const game = gameSnapshot();
+    savedGame.set(game);
+    return game
+      ? Storage.setItem(GAME_KEY, JSON.stringify(game))
+      : Storage.removeItem(GAME_KEY);
+  }
+
+  /** 继续存档：棋盘、设置、悔棋/超时和剩余时间一起恢复。 */
+  function continueGame() {
+    const game = savedGame();
+    if (!game) return;
+
+    const left = Math.max(
+      RESUME_FLOOR_MS,
+      Math.min(MOVE_SECONDS * 1000, game.leftMs),
+    );
+    pausedLeft = left;
+
+    batch(() => {
+      round.update((n) => n + 1);
+      board.set(boardFromMoves(game.moves));
+      moves.set(game.moves);
+      turn.set(savedTurn(game));
+      over.set(null);
+      mode.set(game.mode);
+      level.set(game.level);
+      limitOn.set(game.limitOn);
+      undos.set(game.undos);
+      timeouts.set(game.timeouts);
+      startedAt.set(game.startedAt);
+      leftMs.set(left);
+      thinking.set(false);
+      hover.set(-1);
+      settle.set(null);
+      resultOpen.set(false);
+      menu.set(false);
+      notice.set(null);
+      screen.set("game");
+    });
+  }
+
+  /** 从主页的开局设置开始新对局，同时放弃旧的「继续游戏」存档。 */
+  function startNewGame() {
+    pausedLeft = 0;
+    batch(() => {
+      savedGame.set(null);
+      screen.set("game");
+      reset();
+    });
+    Storage.removeItem(GAME_KEY).catch(() => {});
+  }
+
+  /** 保存并回到主页；棋盘状态留在内存里，点继续再恢复。 */
+  function goHome() {
+    writeGame().catch(() => {});
+    batch(() => {
+      menu.set(false);
+      resultOpen.set(false);
+      settle.set(null);
+      screen.set("home");
+    });
+  }
+
+  function toggleSound() {
+    soundOn.update((on) => !on);
+  }
+
+  /** 退出前先把设置与当前对局写进 storage，再请求宿主关闭界面。 */
+  async function exitGame() {
+    try {
+      await Storage.setItem(SAVE_KEY, settingsJSON());
+    } catch {
+      /* 存储满 / 不可用时仍然允许退出 */
+    }
+    // 在主页退出时不要用内存里的旧棋盘覆盖 goHome 写好的存档
+    if (screen() === "game") {
+      try {
+        await writeGame();
+      } catch {
+        /* 同上 */
+      }
+    }
+    try {
+      process.exit(0);
+    } catch {
+      // 宿主没给权限 / 没有退出处理器时至少回到主页，不把界面卡在菜单里
+      if (screen() === "game") goHome();
+    }
+  }
+
   /* ---------------------------- 副作用 ---------------------------- */
-  // 读取存档（分数、战绩、设置）
+  // 读取存档（分数、战绩、设置）与未下完的对局
   effect(() => {
-    Storage.getItem(SAVE_KEY)
-      .then((raw) => {
+    let alive = true;
+    Promise.all([Storage.getItem(SAVE_KEY), Storage.getItem(GAME_KEY)])
+      .then(([raw, gameRaw]) => {
+        if (!alive) return;
         const saved = readProgress(raw);
+        const game = readSavedGame(gameRaw);
+
         batch(() => {
           if (saved) progress.set(saved);
           try {
-            const meta = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+            const meta = raw
+              ? (JSON.parse(raw) as Record<string, unknown>)
+              : {};
             const lv = meta.level;
             if (lv === "easy" || lv === "normal" || lv === "hard") {
               level.set(lv);
@@ -456,13 +600,28 @@ function App() {
             const md = meta.mode;
             if (md === "pve" || md === "pvp") mode.set(md);
             if (typeof meta.limitOn === "boolean") limitOn.set(meta.limitOn);
+            if (typeof meta.soundOn === "boolean") soundOn.set(meta.soundOn);
           } catch {
             /* 存档损坏时忽略设置，沿用默认值 */
           }
+          // 没有设置档但有对局档时，至少让主页显示存档里的设置
+          if (!raw && game) {
+            mode.set(game.mode);
+            level.set(game.level);
+            limitOn.set(game.limitOn);
+          }
+          savedGame.set(game);
           loaded.set(true);
         });
+
+        if (gameRaw && !game) Storage.removeItem(GAME_KEY).catch(() => {});
       })
-      .catch(() => loaded.set(true));
+      .catch(() => {
+        if (alive) loaded.set(true);
+      });
+    return () => {
+      alive = false;
+    };
   });
 
   // 写存档：只在加载完成后写，避免开局用默认值覆盖旧记录
@@ -471,11 +630,43 @@ function App() {
     const lv = level();
     const md = mode();
     const lim = limitOn();
+    const so = soundOn();
     if (!loaded()) return;
     Storage.setItem(
       SAVE_KEY,
-      JSON.stringify({ ...p, level: lv, mode: md, limitOn: lim }),
+      JSON.stringify({ ...p, level: lv, mode: md, limitOn: lim, soundOn: so }),
     ).catch(() => {});
+  });
+
+  // 写对局存档：每次落子 / 悔棋 / 改设置后写一次；结束或重开时删掉
+  effect(() => {
+    if (!loaded() || screen() !== "game") return;
+    const game = gameSnapshot();
+    savedGame.set(game);
+    if (!game) {
+      Storage.removeItem(GAME_KEY).catch(() => {});
+      return;
+    }
+    Storage.setItem(GAME_KEY, JSON.stringify(game)).catch(() => {});
+  });
+
+  // 倒计时只在内存里走，定期把剩余时间刷进存档，杀掉进程也少丢一点
+  effect(() => {
+    if (
+      !loaded() ||
+      screen() !== "game" ||
+      moves().length === 0 ||
+      over() !== null
+    ) {
+      return;
+    }
+    const timer = setInterval(() => {
+      const game = untracked(gameSnapshot);
+      if (!game) return;
+      savedGame.set(game);
+      Storage.setItem(GAME_KEY, JSON.stringify(game)).catch(() => {});
+    }, GAME_SAVE_MS);
+    return () => clearInterval(timer);
   });
 
   // 启动时合成音效；某个音效失败只是少了那一个，静音也能正常对局
@@ -503,7 +694,6 @@ function App() {
   });
 
   // 最后 5 秒逐秒滴答；菜单暂停期间跳过，关掉菜单不会补响
-  let tickedSecond = 0;
   effect(() => {
     const s = secondsLeft();
     const active = timed();
@@ -520,8 +710,6 @@ function App() {
 
   // 落子倒计时：本地对局菜单打开时暂停，回来后接着走，不会靠开关菜单刷新时间。
   // 将来的联网模式不在 LOCAL_MODES 里，倒计时会继续走。
-  let deadline = 0;
-  let pausedLeft = 0;
   effect(() => {
     const active = timed();
     const paused = (menu() && localMode()) || resultOpen();
@@ -571,8 +759,9 @@ function App() {
     const t = turn();
     const o = over();
     const lv = level();
+    const sc = screen();
 
-    if (m !== "pve" || o !== null || t !== AI) {
+    if (sc !== "game" || m !== "pve" || o !== null || t !== AI) {
       thinking.set(false);
       return;
     }
@@ -625,13 +814,16 @@ function App() {
   effect(() => {
     return keymap.bind({
       u: () => {
-        if (!menu() && !resultOpen()) undo();
+        if (screen() === "game" && !menu() && !resultOpen()) undo();
       },
       r: () => {
-        if (!menu()) reset();
+        if (screen() === "game" && !menu() && !resultOpen()) reset();
       },
-      m: () => menu.update((v) => !v),
+      m: () => {
+        if (screen() === "game") menu.update((v) => !v);
+      },
       escape: () => {
+        if (screen() !== "game") return;
         if (menu()) menu.set(false);
         else if (resultOpen()) resultOpen.set(false);
       },
@@ -645,14 +837,37 @@ function App() {
         style={{ flex: 1, alignItems: "center", backgroundColor: C.bg }}
         onTouchStartCapture={() => soundPrime.update((n) => n + 1)}
       >
-        <View
-          style={{
-            flex: 1,
-            width: "100%",
-            maxWidth: 540,
-            paddingHorizontal: 14,
-          }}
-        >
+        <If when={screen() === "home"}>
+          <Home
+            saved={savedGame()}
+            score={progress().score}
+            best={progress().best}
+            win={progress().win}
+            loss={progress().loss}
+            draw={progress().draw}
+            mode={mode()}
+            level={level()}
+            limitOn={limitOn()}
+            soundOn={soundOn()}
+            onContinue={continueGame}
+            onNewGame={startNewGame}
+            onMode={(m) => mode.set(m)}
+            onLevel={(l) => level.set(l)}
+            onLimit={(on) => limitOn.set(on)}
+            onSound={toggleSound}
+            onExit={exitGame}
+          />
+        </If>
+
+        <If when={screen() === "game"}>
+          <View
+            style={{
+              flex: 1,
+              width: "100%",
+              maxWidth: 540,
+              paddingHorizontal: 14,
+            }}
+          >
           {/* 标题栏 */}
           <View
             style={{
@@ -887,13 +1102,14 @@ function App() {
             />
           </View>
         </View>
+        </If>
       </View>
 
       {/* 音效播放器（隐藏） */}
       <SoundBank srcs={soundSrc} triggers={sounds} prime={soundPrime} />
 
       {/* 菜单 */}
-      <If when={menu()}>
+      <If when={screen() === "game" && menu()}>
         <MenuPanel
           score={progress().score}
           best={progress().best}
@@ -905,16 +1121,20 @@ function App() {
           mode={mode()}
           level={level()}
           limitOn={limitOn()}
+          soundOn={soundOn()}
           onMode={switchMode}
           onLevel={switchLevel}
           onLimit={switchLimit}
+          onSound={toggleSound}
+          onHome={goHome}
+          onExit={exitGame}
           onClear={clearHistory}
           onClose={() => menu.set(false)}
         />
       </If>
 
       {/* 结算 */}
-      <If when={resultOpen() && settle() !== null}>
+      <If when={screen() === "game" && resultOpen() && settle() !== null}>
         <ResultPanel
           outcome={settle()!.outcome}
           title={settle()!.title}
