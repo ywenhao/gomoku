@@ -87,6 +87,7 @@ export function ConfirmButton(props: {
   grow?: boolean;
   testID?: string;
   confirmMs?: number;
+  disabled?: boolean;
 }) {
   const confirming = signal(false);
 
@@ -102,11 +103,13 @@ export function ConfirmButton(props: {
   return (
     <PressButton
       label={confirming() ? props.confirmLabel : props.label}
+      disabled={props.disabled}
       hint={confirming() ? "再点一次确认" : props.hint}
       tone={props.tone}
       grow={props.grow}
       testID={props.testID}
       onPress={() => {
+        if (props.disabled) return;
         if (!confirming()) {
           confirming.set(true);
           return;
@@ -174,7 +177,11 @@ export function Segmented<T extends string>(props: {
 }
 
 /** 棋子圆点（用于状态条、图例） */
-export function StoneDot(props: { player: 1 | 2; size: number; dim?: boolean }) {
+export function StoneDot(props: {
+  player: 1 | 2;
+  size: number;
+  dim?: boolean;
+}) {
   return (
     <View
       style={{

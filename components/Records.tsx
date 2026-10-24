@@ -1,12 +1,7 @@
-import {
-  Scroll,
-  Text,
-  View,
-  computed,
-  effect,
-  signal,
-  untracked,
-} from "nsh";
+import { Scroll, Text, View, computed, effect, signal, untracked } from "nsh";
+import { MultiBoard } from "./MultiBoard";
+import { replayMatch, createMatch, type ExtraKind } from "../lib/multigame";
+import { gameMeta, gameName } from "../lib/catalog";
 import { Board } from "./Board";
 import { C, ConfirmButton, PressButton } from "./ui";
 import { recordMoveCount, type StoredRecord } from "../lib/records";
@@ -115,7 +110,7 @@ function RecordRow(props: { record: StoredRecord; onOpen: () => void }) {
             color: go ? "#2f7a58" : C.ink,
           }}
         >
-          {go ? "围" : "五"}
+          {gameMeta(props.record.game).glyph}
         </Text>
       </View>
       <View style={{ flex: 1, gap: 2 }}>
@@ -213,6 +208,97 @@ function RecordView(props: {
     playing.set(true);
   }
 
+  if (props.record.actions)
+    return (
+      <Scroll
+        testID="record-view"
+        style={{ flex: 1, width: "100%" }}
+        contentStyle={{ padding: 16, alignItems: "center" }}
+      >
+        <View
+          style={{ width: "100%", maxWidth: 540, gap: 10 }}
+          onLayout={(e) =>
+            boardSize.set(Math.max(200, Math.min(500, e.size.width)))
+          }
+        >
+          <Text style={{ fontSize: 22, color: C.ink }}>
+            {props.record.name}
+          </Text>
+          <PressButton
+            label="返回棋谱库"
+            testID="record-back"
+            onPress={props.onBack}
+          />
+          <Text testID="record-step" style={{ color: C.muted }}>
+            第 {step()} / {total} 步 · {gameName(props.record.game)} ·
+            复盘公开双方棋子
+          </Text>
+          <MultiBoard
+            match={() =>
+              replayMatch(
+                props.record.game as ExtraKind,
+                props.record.actions!.slice(0, step()),
+                props.record.initialBoard,
+              ) ?? createMatch(props.record.game as ExtraKind)
+            }
+            size={() => boardSize() || 340}
+            selected={() => -1}
+            targets={() => []}
+            onCell={() => {}}
+            disabled
+            reveal
+          />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            <PressButton
+              label="第一手"
+              testID="record-first"
+              onPress={() => {
+                playing.set(false);
+                step.set(0);
+              }}
+            />
+            <PressButton
+              label="上一步"
+              testID="record-prev"
+              disabled={step() === 0}
+              onPress={() => {
+                playing.set(false);
+                step.update((v) => v - 1);
+              }}
+            />
+            <PressButton
+              label={playing() ? "暂停" : "播放"}
+              testID="record-play"
+              onPress={togglePlay}
+            />
+            <PressButton
+              label="下一步"
+              testID="record-next"
+              disabled={step() >= total}
+              onPress={() => {
+                playing.set(false);
+                step.update((v) => v + 1);
+              }}
+            />
+            <PressButton
+              label="最后一手"
+              testID="record-last"
+              onPress={() => {
+                playing.set(false);
+                step.set(total);
+              }}
+            />
+          </View>
+          <ConfirmButton
+            label="删除棋谱"
+            confirmLabel="确认删除"
+            testID="record-delete"
+            onConfirm={props.onDelete}
+          />
+        </View>
+      </Scroll>
+    );
+
   return (
     <View
       testID="record-view"
@@ -246,8 +332,7 @@ function RecordView(props: {
           <Text style={{ fontSize: 10, color: C.muted, marginTop: 3 }}>
             {MODE_NAME[props.record.mode]} · {LEVEL_NAME[props.record.level]} ·{" "}
             {go ? `${size} 路 · ` : "15 路 · "}
-            {total} 手
-            {props.record.result ? ` · ${props.record.result}` : ""}
+            {total} 手{props.record.result ? ` · ${props.record.result}` : ""}
           </Text>
         </View>
         <PressButton label="列表" testID="record-back" onPress={props.onBack} />
@@ -391,84 +476,87 @@ export function Records(props: {
   );
 
   return (
-    <If when={selected()} else={
-      <Scroll
-        testID="records-screen"
-        style={{ flex: 1, width: "100%" }}
-        contentStyle={{
-          flexGrow: 1,
-          alignItems: "center",
-          paddingHorizontal: 14,
-          paddingBottom: 26,
-        }}
-      >
-        <View style={{ width: "100%", maxWidth: 560 }}>
-          <Header
-            title="棋谱库"
-            sub={`手动保存的整局棋 · ${props.records.length} 份`}
-            back="返回"
-            testID="records-back"
-            onBack={props.onBack}
-          />
+    <If
+      when={selected()}
+      else={
+        <Scroll
+          testID="records-screen"
+          style={{ flex: 1, width: "100%" }}
+          contentStyle={{
+            flexGrow: 1,
+            alignItems: "center",
+            paddingHorizontal: 14,
+            paddingBottom: 26,
+          }}
+        >
+          <View style={{ width: "100%", maxWidth: 560 }}>
+            <Header
+              title="棋谱库"
+              sub={`手动保存的整局棋 · ${props.records.length} 份`}
+              back="返回"
+              testID="records-back"
+              onBack={props.onBack}
+            />
 
-          <Text
-            style={{
-              fontSize: 11.5,
-              lineHeight: 18,
-              color: C.muted,
-              marginTop: 12,
-              marginBottom: 10,
-            }}
-          >
-            对局菜单和人机大战控制栏都能保存棋谱。保存的是完整手顺，可以逐步回看、自动播放，
-            也可以在这里删除。棋谱与「继续游戏」互不影响。
-          </Text>
-
-          {props.records.length === 0 ? (
-            <View
+            <Text
               style={{
-                paddingVertical: 44,
-                alignItems: "center",
-                borderRadius: 15,
-                borderWidth: 1,
-                borderColor: C.line,
-                backgroundColor: C.panel,
-                gap: 5,
+                fontSize: 11.5,
+                lineHeight: 18,
+                color: C.muted,
+                marginTop: 12,
+                marginBottom: 10,
               }}
             >
-              <Text style={{ fontSize: 13, fontWeight: "600", color: C.ink }}>
-                还没有保存的棋谱
-              </Text>
-              <Text style={{ fontSize: 11, color: C.muted }}>
-                下完一局后打开菜单，点「保存棋谱」。
-              </Text>
-            </View>
-          ) : (
-            <View style={{ gap: 7 }}>
-              <Each of={props.records} key={(r) => r.id}>
-                {(item) => (
-                  <RecordRow
-                    record={item()}
-                    onOpen={() => selectedId.set(item().id)}
-                  />
-                )}
-              </Each>
-            </View>
-          )}
+              对局菜单和人机大战控制栏都能保存棋谱。保存的是完整手顺，可以逐步回看、自动播放，
+              也可以在这里删除。棋谱与「继续游戏」互不影响。
+            </Text>
 
-          <Text
-            style={{
-              fontSize: 10,
-              lineHeight: 16,
-              color: C.muted,
-              marginTop: 14,
-            }}
-          >
-            棋谱保存在本机 storage 中，最多保留 60 份；删除后无法恢复。
-          </Text>
-        </View>
-      </Scroll>
-    }>
+            {props.records.length === 0 ? (
+              <View
+                style={{
+                  paddingVertical: 44,
+                  alignItems: "center",
+                  borderRadius: 15,
+                  borderWidth: 1,
+                  borderColor: C.line,
+                  backgroundColor: C.panel,
+                  gap: 5,
+                }}
+              >
+                <Text style={{ fontSize: 13, fontWeight: "600", color: C.ink }}>
+                  还没有保存的棋谱
+                </Text>
+                <Text style={{ fontSize: 11, color: C.muted }}>
+                  下完一局后打开菜单，点「保存棋谱」。
+                </Text>
+              </View>
+            ) : (
+              <View style={{ gap: 7 }}>
+                <Each of={props.records} key={(r) => r.id}>
+                  {(item) => (
+                    <RecordRow
+                      record={item()}
+                      onOpen={() => selectedId.set(item().id)}
+                    />
+                  )}
+                </Each>
+              </View>
+            )}
+
+            <Text
+              style={{
+                fontSize: 10,
+                lineHeight: 16,
+                color: C.muted,
+                marginTop: 14,
+              }}
+            >
+              棋谱保存在本机 storage 中，最多保留 60 份；删除后无法恢复。
+            </Text>
+          </View>
+        </Scroll>
+      }
+    >
       {(current) => (
         <RecordView
           record={current()}

@@ -12,6 +12,12 @@ import {
 import { SafeAreaView } from "nsh/base";
 import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";
+import { Endgames } from "./components/Endgames";
+import { MultiGame } from "./components/MultiGame";
+import { GuideStrip, Academy } from "./components/Guide";
+import { GAMES } from "./lib/catalog";
+import { findTimeControl } from "./lib/clock";
+import type { ExtraKind } from "./lib/multigame";
 import { Board } from "./components/Board";
 import { GoGame, type GoFinish } from "./components/GoGame";
 import { HelpPanel } from "./components/Help";
@@ -80,7 +86,16 @@ const AIAI_DELAY_MS = 2000;
 /** 回放每手间隔 */
 const REPLAY_MS = 620;
 
-type Screen = "home" | "game" | "go" | "tsumego" | "learn" | "records";
+type Screen =
+  | "home"
+  | "game"
+  | "go"
+  | "extra"
+  | "academy"
+  | "endgames"
+  | "tsumego"
+  | "learn"
+  | "records";
 
 /** 本地对局（人机 / 双人 / 人机大战）：菜单打开时暂停倒计时。 */
 const LOCAL_MODES: readonly Mode[] = ["pve", "pvp", "aiai"];
@@ -145,7 +160,9 @@ function readProgress(raw: string | null): Progress | null {
     return null;
   }
   if (!data || typeof data !== "object") return null;
-  const list = Array.isArray(data.history) ? (data.history as GameRecord[]) : [];
+  const list = Array.isArray(data.history)
+    ? (data.history as GameRecord[])
+    : [];
   return {
     score: num(data.score),
     best: num(data.best),
@@ -163,7 +180,9 @@ function readProgress(raw: string | null): Progress | null {
       )
       .map((r) => ({
         ...r,
-        game: (r.game === "go" ? "go" : "gomoku") as GameKind,
+        game: (GAMES.some((g) => g.kind === r.game)
+          ? r.game
+          : "gomoku") as GameKind,
         mode: MODES.includes(r.mode) ? r.mode : "pve",
         level: LEVELS.includes(r.level) ? r.level : "normal",
       }))
@@ -192,6 +211,7 @@ function App() {
 
   const kind = signal<GameKind>("gomoku");
   const goSize = signal<GoSize>(9);
+  const timeControl = signal("");
   const goInitial = signal<SavedGame | null>(null);
 
   const progress = signal<Progress>(EMPTY);
@@ -227,6 +247,7 @@ function App() {
     win: signal(0),
     loss: signal(0),
     draw: signal(0),
+    check: signal(0),
   };
 
   /* ---------------------------- 派生 ---------------------------- */
@@ -321,10 +342,7 @@ function App() {
     }
     return out;
   });
-  const learnTotal = LEARN_TRACKS.reduce(
-    (n, t) => n + t.lessons.length,
-    0,
-  );
+  const learnTotal = LEARN_TRACKS.reduce((n, t) => n + t.lessons.length, 0);
 
   /* ---------------------------- 动作 ---------------------------- */
   function flash(text: string) {
@@ -421,7 +439,11 @@ function App() {
 
     // 双人局没有「我方」：任意一方连成五子都是赢棋；只有人机输给 AI 才放落败音
     playSound(
-      r.kind === "draw" ? "draw" : outcome === "loss" && mode() === "pve" ? "loss" : "win",
+      r.kind === "draw"
+        ? "draw"
+        : outcome === "loss" && mode() === "pve"
+          ? "loss"
+          : "win",
     );
   }
 
@@ -632,10 +654,12 @@ function App() {
       soundOn: soundOn(),
       kind: kind(),
       goSize: goSize(),
+      timeControl: timeControl(),
     });
   }
 
   function writeGame(): Promise<void> {
+    if (mode() === "aiai") return Promise.resolve();
     const game = gameSnapshot();
     savedGame.set(game);
     return game
@@ -655,6 +679,18 @@ function App() {
     const game = savedGame();
     if (!game) return;
 
+    if (game.kind !== "go" && game.kind !== "gomoku") {
+      batch(() => {
+        kind.set(game.kind);
+        goInitial.set(game);
+        mode.set(game.mode);
+        level.set(game.level);
+        limitOn.set(game.limitOn);
+        timeControl.set(game.timeControl ?? "");
+        screen.set("extra");
+      });
+      return;
+    }
     if (game.kind === "go") {
       batch(() => {
         kind.set("go");
@@ -710,7 +746,7 @@ function App() {
     pausedLeft = 0;
     const next = kind();
     batch(() => {
-      savedGame.set(null);
+      if (mode() !== "aiai") savedGame.set(null);
       goInitial.set(null);
       menu.set(false);
       helpOpen.set(false);
@@ -718,12 +754,14 @@ function App() {
       settle.set(null);
       if (next === "go") {
         screen.set("go");
+      } else if (next !== "gomoku") {
+        screen.set("extra");
       } else {
         screen.set("game");
         reset();
       }
     });
-    Storage.removeItem(GAME_KEY).catch(() => {});
+    if (mode() !== "aiai") Storage.removeItem(GAME_KEY).catch(() => {});
   }
 
   function startAiai() {
@@ -735,7 +773,7 @@ function App() {
   function goHome() {
     if (screen() === "game") {
       writeGame().catch(() => {});
-    } else if (screen() === "go") {
+    } else if (screen() === "go" || screen() === "extra") {
       writeGoGame().catch(() => {});
     }
     batch(() => {
@@ -779,17 +817,13 @@ function App() {
 
   function solveTsumego(id: string) {
     study.update((s) =>
-      s.tsumego.includes(id)
-        ? s
-        : { ...s, tsumego: addStudyId(s.tsumego, id) },
+      s.tsumego.includes(id) ? s : { ...s, tsumego: addStudyId(s.tsumego, id) },
     );
   }
 
   function completeLesson(id: string) {
     study.update((s) =>
-      s.lessons.includes(id)
-        ? s
-        : { ...s, lessons: addStudyId(s.lessons, id) },
+      s.lessons.includes(id) ? s : { ...s, lessons: addStudyId(s.lessons, id) },
     );
   }
 
@@ -799,6 +833,7 @@ function App() {
   }
 
   function handleGoSnapshot(game: SavedGame | null) {
+    if (mode() === "aiai") return;
     savedGame.set(game);
     if (!loaded()) return;
     if (game) {
@@ -808,7 +843,7 @@ function App() {
     }
   }
 
-  function handleGoFinish(finishInfo: GoFinish) {
+  function handleGoFinish(finishInfo: GoFinish, gameKind: GameKind = "go") {
     const pve = mode() === "pve";
     const outcome = finishInfo.outcome;
     const prev = progress();
@@ -823,8 +858,8 @@ function App() {
           level: level(),
           moves: finishInfo.moves,
           seconds: finishInfo.seconds,
-          undos: 0,
-          timeouts: 0,
+          undos: finishInfo.undos ?? 0,
+          timeouts: finishInfo.timeouts ?? 0,
           streak,
         })
       : { lines: [], total: 0, stars: 0 };
@@ -836,8 +871,8 @@ function App() {
       outcome,
       level: level(),
       mode: mode(),
-      game: "go",
-      goSize: goSize(),
+      game: gameKind,
+      goSize: gameKind === "go" ? goSize() : undefined,
       result: finishInfo.result,
       moves: finishInfo.moves,
       seconds: finishInfo.seconds,
@@ -854,10 +889,10 @@ function App() {
         draw: prev.draw + (outcome === "draw" ? 1 : 0),
         history: [record, ...prev.history].slice(0, HISTORY_LIMIT),
       });
-      savedGame.set(null);
+      if (mode() !== "aiai") savedGame.set(null);
       paused.set(false);
     });
-    Storage.removeItem(GAME_KEY).catch(() => {});
+    if (mode() !== "aiai") Storage.removeItem(GAME_KEY).catch(() => {});
   }
 
   /** 退出前先把设置与当前对局写进 storage，再请求宿主关闭界面。 */
@@ -869,7 +904,7 @@ function App() {
     }
     try {
       if (screen() === "game") await writeGame();
-      else if (screen() === "go") await writeGoGame();
+      else if (screen() === "go" || screen() === "extra") await writeGoGame();
     } catch {
       /* 同上 */
     }
@@ -904,6 +939,8 @@ function App() {
             const meta = raw
               ? (JSON.parse(raw) as Record<string, unknown>)
               : {};
+            if (typeof meta.timeControl === "string")
+              timeControl.set(meta.timeControl);
             const lv = meta.level;
             if (LEVELS.includes(lv as Difficulty)) {
               level.set(lv as Difficulty);
@@ -912,8 +949,8 @@ function App() {
             if (MODES.includes(md as Mode)) mode.set(md as Mode);
             if (typeof meta.limitOn === "boolean") limitOn.set(meta.limitOn);
             if (typeof meta.soundOn === "boolean") soundOn.set(meta.soundOn);
-            if (meta.kind === "go" || meta.kind === "gomoku") {
-              kind.set(meta.kind);
+            if (GAMES.some((g) => g.kind === meta.kind)) {
+              kind.set(meta.kind as GameKind);
             }
             if (GO_SIZES.includes(meta.goSize as GoSize)) {
               goSize.set(meta.goSize as GoSize);
@@ -954,6 +991,7 @@ function App() {
     const so = soundOn();
     const kd = kind();
     const gs = goSize();
+    const tc = timeControl();
     if (!loaded()) return;
     Storage.setItem(
       SAVE_KEY,
@@ -965,6 +1003,7 @@ function App() {
         soundOn: so,
         kind: kd,
         goSize: gs,
+        timeControl: tc,
       }),
     ).catch(() => {});
   });
@@ -985,7 +1024,7 @@ function App() {
 
   // 写对局存档：每次落子 / 悔棋 / 改设置后写一次；结束或重开时删掉
   effect(() => {
-    if (!loaded() || screen() !== "game") return;
+    if (!loaded() || screen() !== "game" || mode() === "aiai") return;
     const game = gameSnapshot();
     savedGame.set(game);
     if (!game) {
@@ -1000,6 +1039,7 @@ function App() {
     if (
       !loaded() ||
       screen() !== "game" ||
+      mode() === "aiai" ||
       moves().length === 0 ||
       over() !== null
     ) {
@@ -1148,7 +1188,11 @@ function App() {
       const now = untracked(() => turn());
       let choice: AiChoice | null = null;
       try {
-        choice = findBestMove(untracked(() => board()), now, lv);
+        choice = findBestMove(
+          untracked(() => board()),
+          now,
+          lv,
+        );
       } catch {
         choice = null;
       }
@@ -1207,22 +1251,12 @@ function App() {
   effect(() => {
     return keymap.bind({
       u: () => {
-        if (
-          screen() === "game" &&
-          !menu() &&
-          !helpOpen() &&
-          !resultOpen()
-        ) {
+        if (screen() === "game" && !menu() && !helpOpen() && !resultOpen()) {
           undo();
         }
       },
       r: () => {
-        if (
-          screen() === "game" &&
-          !menu() &&
-          !helpOpen() &&
-          !resultOpen()
-        ) {
+        if (screen() === "game" && !menu() && !helpOpen() && !resultOpen()) {
           reset();
         }
       },
@@ -1253,6 +1287,8 @@ function App() {
             saved={savedGame()}
             kind={kind()}
             goSize={goSize()}
+            timeControl={findTimeControl(kind(), timeControl()).id}
+            onTimeControl={(id) => timeControl.set(id)}
             score={progress().score}
             best={progress().best}
             win={progress().win}
@@ -1278,8 +1314,14 @@ function App() {
             onSound={toggleSound}
             onHelp={() => helpOpen.set(true)}
             onExit={exitGame}
-            onTsumego={() => screen.set("tsumego")}
-            onLearn={() => screen.set("learn")}
+            onTsumego={() =>
+              screen.set(
+                kind() === "chess" || kind() === "xiangqi"
+                  ? "endgames"
+                  : "tsumego",
+              )
+            }
+            onLearn={() => screen.set(kind() === "go" ? "learn" : "academy")}
             onRecords={() => screen.set("records")}
           />
         </If>
@@ -1293,6 +1335,7 @@ function App() {
               paddingHorizontal: 14,
             }}
           >
+            <GuideStrip kind="gomoku" />
             {/* 标题栏 */}
             <View
               style={{
@@ -1502,9 +1545,7 @@ function App() {
                       right: 0,
                       alignItems: "center",
                       opacity: notice() === null ? 0 : 1,
-                      transform: [
-                        { translateY: notice() === null ? -6 : 0 },
-                      ],
+                      transform: [{ translateY: notice() === null ? -6 : 0 }],
                       transitionProperty: "transform, opacity",
                       transitionDuration: 220,
                     }}
@@ -1588,8 +1629,7 @@ function App() {
                     testID="aiai-step-forward"
                     onPress={stepForward}
                     disabled={
-                      reviewAt() === null ||
-                      reviewAt()! >= moves().length
+                      reviewAt() === null || reviewAt()! >= moves().length
                     }
                     grow
                   />
@@ -1621,9 +1661,44 @@ function App() {
           </View>
         </If>
 
+        <If when={screen() === "extra"}>
+          <MultiGame
+            kind={kind() as ExtraKind}
+            initial={goInitial()}
+            mode={mode()}
+            level={level()}
+            limitOn={limitOn()}
+            timeControl={timeControl()}
+            helpOpen={helpOpen()}
+            onSnapshot={handleGoSnapshot}
+            onFinish={(f) => handleGoFinish(f, kind())}
+            onRecord={(r) => addRecord(r, true)}
+            playSound={playSound}
+            onHome={goHome}
+            onHelp={() => helpOpen.set(true)}
+          />
+        </If>
+        <If when={screen() === "endgames"}>
+          <Endgames
+            initial={kind() === "xiangqi" ? "xiangqi" : "chess"}
+            solved={study().tsumego}
+            onSolved={solveTsumego}
+            onBack={() => screen.set("home")}
+          />
+        </If>
+        <If when={screen() === "academy"}>
+          <Academy
+            initial={kind()}
+            completed={study().lessons}
+            onComplete={completeLesson}
+            onBack={() => screen.set("home")}
+            onGoLearn={() => screen.set("learn")}
+          />
+        </If>
         <If when={screen() === "go"}>
           <GoGame
             initial={goInitial()}
+            timeControl={timeControl()}
             mode={mode()}
             level={level()}
             limitOn={limitOn()}

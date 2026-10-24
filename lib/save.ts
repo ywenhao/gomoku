@@ -28,6 +28,9 @@ import {
   type GoSize,
 } from "./go";
 import { MOVE_SECONDS } from "./score";
+import { GAMES, isComplexGame } from "./catalog";
+import { replayMatch, type Action, type ExtraKind } from "./multigame";
+import { restoreClock, type MatchClock } from "./clock";
 
 export interface SavedGame {
   kind: GameKind;
@@ -43,6 +46,12 @@ export interface SavedGame {
   timeouts: number;
   startedAt: number;
   savedAt: number;
+  actions?: Action[];
+  initialBoard?: number[];
+  clock?: MatchClock;
+  timeControl?: string;
+  scoring?: boolean;
+  dead?: number[];
 }
 
 const FULL_MS = MOVE_SECONDS * 1000;
@@ -68,6 +77,12 @@ function time(value: unknown, fallback: number): number {
 
 /** 存档里下一手轮到谁：黑白交替，由最后一手反推。 */
 export function savedTurn(game: SavedGame): Player {
+  if (game.actions)
+    return Math.min(
+      2,
+      replayMatch(game.kind as ExtraKind, game.actions, game.initialBoard)
+        ?.state.turn ?? 1,
+    ) as Player;
   const last =
     game.kind === "go"
       ? game.goMoves?.[game.goMoves.length - 1]
@@ -76,6 +91,7 @@ export function savedTurn(game: SavedGame): Player {
 }
 
 export function savedMoveCount(game: SavedGame): number {
+  if (game.actions) return game.actions.length;
   return game.kind === "go" ? (game.goMoves?.length ?? 0) : game.moves.length;
 }
 
@@ -104,7 +120,9 @@ export function readSavedGame(raw: string | null): SavedGame | null {
   }
   if (!value || typeof value !== "object") return null;
   const data = value as Record<string, unknown>;
-  const kind: GameKind = data.kind === "go" ? "go" : "gomoku";
+  if (data.kind !== undefined && !GAMES.some((g) => g.kind === data.kind))
+    return null;
+  const kind: GameKind = (data.kind ?? "gomoku") as GameKind;
 
   const now = Date.now();
   const mode = readMode(data.mode);
@@ -116,7 +134,10 @@ export function readSavedGame(raw: string | null): SavedGame | null {
     limitOn: typeof data.limitOn === "boolean" ? data.limitOn : true,
     leftMs:
       typeof data.leftMs === "number" && Number.isFinite(data.leftMs)
-        ? Math.max(0, Math.min(FULL_MS, data.leftMs))
+        ? Math.max(
+            0,
+            Math.min(isComplexGame(kind) ? 86_400_000 : FULL_MS, data.leftMs),
+          )
         : FULL_MS,
     undos: count(data.undos),
     timeouts: count(data.timeouts),
@@ -124,8 +145,35 @@ export function readSavedGame(raw: string | null): SavedGame | null {
     savedAt: time(data.savedAt, now),
   };
 
+  if (kind !== "gomoku" && kind !== "go") {
+    if (!Array.isArray(data.actions) || data.actions.length > 4000) return null;
+    const initialBoard = data.initialBoard as number[] | undefined;
+    if (initialBoard !== undefined && !Array.isArray(initialBoard)) return null;
+    const match = replayMatch(kind, data.actions as Action[], initialBoard);
+    if (!match || match.state.result) return null;
+    const clock = restoreClock(
+      kind,
+      data.clock,
+      Math.min(2, match.state.turn) as Player,
+    );
+    if (data.clock && !clock) return null;
+    return {
+      ...common,
+      moves: [],
+      actions: data.actions as Action[],
+      initialBoard,
+      clock: clock ?? undefined,
+      timeControl: clock?.control.id,
+    };
+  }
+
   if (kind === "go") {
-    if (!Array.isArray(data.goMoves) || data.goMoves.length === 0) return null;
+    if (
+      !Array.isArray(data.goMoves) ||
+      data.goMoves.length === 0 ||
+      data.goMoves.length > 4000
+    )
+      return null;
     const size = GO_SIZES.includes(data.goSize as GoSize)
       ? (data.goSize as GoSize)
       : 19;
@@ -151,13 +199,35 @@ export function readSavedGame(raw: string | null): SavedGame | null {
       });
     }
     const state = goStateFromMoves(size, moves);
-    // 两手虚手之后已经进入数子，不该出现在「继续游戏」里
-    if (!state || state.passes >= 2) return null;
+    if (!state) return null;
+    const clock = restoreClock(
+      "go",
+      data.clock,
+      state.moves.length % 2 === 0 ? 1 : 2,
+    );
+    if (data.clock && !clock) return null;
     return {
       ...common,
       moves: [],
       goMoves: state.moves,
       goSize: size,
+      clock: clock ?? undefined,
+      timeControl:
+        typeof data.timeControl === "string" ? data.timeControl : undefined,
+      scoring: state.passes >= 2,
+      dead: Array.isArray(data.dead)
+        ? ([
+            ...new Set(
+              data.dead.filter(
+                (i) =>
+                  Number.isInteger(i) &&
+                  i >= 0 &&
+                  i < size * size &&
+                  state.board[i] !== 0,
+              ),
+            ),
+          ] as number[])
+        : [],
     };
   }
 

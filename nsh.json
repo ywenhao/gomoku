@@ -1,14 +1,18 @@
 {
   "name": "弈境",
   "id": "com.gomoku.app",
-  "version": "1.4.0",
-  "build": 5,
+  "version": "1.5.0",
+  "build": 6,
   "icon": "icon.png",
   "appearance": "light",
   "capabilities": {
     "fs": {
-      "read": ["${dataDir}"],
-      "write": ["${dataDir}"]
+      "read": [
+        "${dataDir}"
+      ],
+      "write": [
+        "${dataDir}"
+      ]
     },
     "process": {
       "exit": true

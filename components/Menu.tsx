@@ -1,12 +1,9 @@
+import { gameName } from "../lib/catalog";
 import { Scroll, Text, View, effect, signal } from "nsh";
 import { windowSize } from "nsh/device";
 import { C, ConfirmButton, PressButton, Segmented } from "./ui";
 import { formatDuration, formatStamp, type GameRecord } from "../lib/score";
-import type {
-  Difficulty,
-  GameKind,
-  Mode,
-} from "../lib/gomoku";
+import type { Difficulty, GameKind, Mode } from "../lib/gomoku";
 import type { GoSize } from "../lib/go";
 
 const MODES: readonly { key: Mode; label: string }[] = [
@@ -176,7 +173,11 @@ export function MenuPanel(props: {
           borderColor: C.line,
           boxShadow: "0 24px 60px rgba(40,26,12,0.34)",
         }}
-        contentStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 18 }}
+        contentStyle={{
+          paddingHorizontal: 18,
+          paddingTop: 16,
+          paddingBottom: 18,
+        }}
       >
         <View
           style={{
@@ -364,9 +365,7 @@ export function MenuPanel(props: {
               gap: 10,
             }}
           >
-            <Text style={{ fontSize: 13.5, color: C.ink }}>
-              限时落子 30 秒
-            </Text>
+            <Text style={{ fontSize: 13.5, color: C.ink }}>限时落子 30 秒</Text>
             <Segmented
               value={() => (props.limitOn ? "on" : "off")}
               options={LIMITS}
@@ -404,7 +403,11 @@ export function MenuPanel(props: {
           </If>
           <PressButton
             label="玩法与帮助"
-            hint={go ? "查看围棋规则、气、提子与数子" : "查看规则、棋型、开局布局与攻防顺序"}
+            hint={
+              go
+                ? "查看围棋规则、气、提子与数子"
+                : "查看规则、棋型、开局布局与攻防顺序"
+            }
             testID="menu-help"
             onPress={props.onHelp}
           />
@@ -474,14 +477,14 @@ export function MenuPanel(props: {
                         color: OUTCOME_COLOR[item().outcome],
                       }}
                     >
-                      {item().game === "go" && item().result
+                      {item().game !== "gomoku" && item().result
                         ? item().result!.slice(0, 1)
                         : OUTCOME_TEXT[item().outcome]}
                     </Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 12, color: C.ink }}>
-                      {item().game === "go" ? "围棋" : "五子棋"} ·{" "}
+                      {gameName(item().game ?? "gomoku")} ·{" "}
                       {LEVEL_NAME[item().level]} · {item().moves} 手 ·{" "}
                       {formatDuration(item().seconds)}
                       {item().mode === "pvp"
@@ -548,7 +551,7 @@ export function MenuPanel(props: {
           }}
         >
           {go
-            ? "围棋采用中国规则数子：棋子 + 围空，白棋贴 7.5 子。连续两次虚手进入数子，可标记死子后确认结果。"
+            ? "围棋采用中国规则数子：棋子 + 围空，白棋贴 7.5 点（3¾子）。连续两次虚手进入数子，可标记死子后确认结果。"
             : "计分：胜利基础分随难度（100 / 180 / 300 / 500），另加速度、效率与连胜奖励；悔棋 −15、超时 −10。"}
           清空记录会同时重置总分、最高分与连胜。
         </Text>

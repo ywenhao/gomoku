@@ -1,3 +1,5 @@
+import { GAMES, gameName } from "../lib/catalog";
+import { GUIDES } from "../lib/guides";
 import { Scroll, Text, View, computed, signal, type JSX } from "nsh";
 import { windowSize } from "nsh/device";
 import { Board, type BoardMark } from "./Board";
@@ -151,7 +153,10 @@ function GomokuHelp() {
       <Section title="一、怎么下">
         <Para>
           黑棋先行，双方轮流在交叉点落子。横、竖、两条斜线任意方向先连成
-          <Text style={{ color: C.ink, fontWeight: "700" }}> 五子或五子以上 </Text>
+          <Text style={{ color: C.ink, fontWeight: "700" }}>
+            {" "}
+            五子或五子以上{" "}
+          </Text>
           的一方获胜；棋盘下满仍未分出胜负则为和棋。
         </Para>
         <Para>
@@ -215,9 +220,13 @@ function GomokuHelp() {
           轮到你时，按下面的顺序检查，能避免“只顾进攻、忘了对手已经四连”的常见崩盘：
         </Para>
         <Bullet>自己能成五：直接落子获胜，不用考虑别的。</Bullet>
-        <Bullet>对手能成五：必须堵住那个成五点；有两个不同的成五点通常已经救不了。</Bullet>
+        <Bullet>
+          对手能成五：必须堵住那个成五点；有两个不同的成五点通常已经救不了。
+        </Bullet>
         <Bullet>自己能做活四或双四：落子，下一手必胜。</Bullet>
-        <Bullet>对手下一步能做活四：占住能形成活四的关键点，不能去别处抢攻。</Bullet>
+        <Bullet>
+          对手下一步能做活四：占住能形成活四的关键点，不能去别处抢攻。
+        </Bullet>
         <Bullet>
           自己有连续的冲四线路（VCF）：一路冲四直到成五；没有后续的单独冲四
           往往只是帮对手落子，不要乱冲。
@@ -233,12 +242,18 @@ function GomokuHelp() {
       </Section>
 
       <Section title="五、常见错误">
-        <Bullet>只盯着自己的三连，没看到对手的冲四或活三，下一手直接被成五。</Bullet>
+        <Bullet>
+          只盯着自己的三连，没看到对手的冲四或活三，下一手直接被成五。
+        </Bullet>
         <Bullet>把眠三当成活三，或者堵错一端，让对手从另一端做出活四。</Bullet>
         <Bullet>开局把棋子下在边角，子力分散，中盘没有可连接的方向。</Bullet>
         <Bullet>全程只做一条线，被对手一次封死后没有第二计划。</Bullet>
-        <Bullet>为了“先手”连续冲四，却没有后续成五线路，反而把自己的变化走死。</Bullet>
-        <Bullet>时间快到时还在想复杂进攻；最后几秒应先找成五和对手的成五点。</Bullet>
+        <Bullet>
+          为了“先手”连续冲四，却没有后续成五线路，反而把自己的变化走死。
+        </Bullet>
+        <Bullet>
+          时间快到时还在想复杂进攻；最后几秒应先找成五和对手的成五点。
+        </Bullet>
       </Section>
 
       <Section title="六、操作与计分">
@@ -253,7 +268,8 @@ function GomokuHelp() {
           桌面快捷键：U 悔棋、R 重新开始、M 菜单、Esc 关闭帮助或浮层。
         </Bullet>
         <Bullet>
-          胜利基础分：简单 100、普通 180、困难 300、地狱 500；另有速度、效率和连胜奖励。
+          胜利基础分：简单 100、普通 180、困难 300、地狱
+          500；另有速度、效率和连胜奖励。
         </Bullet>
       </Section>
 
@@ -282,7 +298,8 @@ function GoHelp() {
       <Section title="一、围棋是什么">
         <Para>
           围棋是两人轮流在交叉点落子的棋类。黑棋先行，白棋随后。棋子落下后不再移动，
-          除非被对方提掉。目标不是吃子，而是用棋子围出比对方更多的空地（目 / 子）。
+          除非被对方提掉。目标不是吃子，而是用棋子围出比对方更多的空地（目 /
+          子）。
         </Para>
         <MiniBoard
           n={9}
@@ -397,8 +414,9 @@ function GoHelp() {
 
       <Section title="六、胜负：中国规则数子">
         <Para>
-          终局时，黑棋的总数 = 黑棋棋子数 + 黑棋围住的空点；白棋同样计算，并额外加上
-          7.5 子贴目。总数多的一方获胜。被标记为死子的棋不算，它占的点归对方。
+          终局时，黑棋的总数 = 黑棋棋子数 +
+          黑棋围住的空点；白棋同样计算，并额外加上 7.5
+          点（3¾子）贴目。总数多的一方获胜。被标记为死子的棋不算，它占的点归对方。
         </Para>
         <MiniBoard
           stones={[
@@ -417,12 +435,14 @@ function GoHelp() {
           caption="黑棋围住的空点都算黑棋；角上围空最省子。"
         />
         <Bullet>先看整块棋有没有两只真眼；没有眼又逃不掉的通常是死棋。</Bullet>
-        <Bullet>贴目 7.5 子意味着黑棋需要明显领先才能赢。</Bullet>
+        <Bullet>贴目 7.5 点（3¾子）意味着黑棋需要明显领先才能赢。</Bullet>
         <Bullet>拿不准时继续下到局面清楚，或使用「标记死子」功能。</Bullet>
       </Section>
 
       <Section title="七、常用术语">
-        <Term name="星位">棋盘上的小黑点，9 路在四角和中央；中央星位叫天元。</Term>
+        <Term name="星位">
+          棋盘上的小黑点，9 路在四角和中央；中央星位叫天元。
+        </Term>
         <Term name="布局">开局阶段抢占角、边与大场的下法。</Term>
         <Term name="定式">角部经过长期实践形成的、双方大致可接受的变化。</Term>
         <Term name="手筋">局部最巧妙、效率最高的一手，常能以少胜多。</Term>
@@ -433,9 +453,13 @@ function GoHelp() {
       </Section>
 
       <Section title="八、新手怎么开始">
-        <Bullet>先用 9 路棋盘，从「学棋」的启蒙路线开始，一课一课做测验。</Bullet>
+        <Bullet>
+          先用 9 路棋盘，从「学棋」的启蒙路线开始，一课一课做测验。
+        </Bullet>
         <Bullet>每盘棋只定一个目标：例如「这盘我要学会看气」。</Bullet>
-        <Bullet>做残局时先自己算，再看提示；错手不会污染棋盘，可以反复尝试。</Bullet>
+        <Bullet>
+          做残局时先自己算，再看提示；错手不会污染棋盘，可以反复尝试。
+        </Bullet>
         <Bullet>输棋后先找一手最想重下的棋，比只看胜负更有用。</Bullet>
       </Section>
 
@@ -504,7 +528,11 @@ export function HelpPanel(props: { kind?: GameKind; onClose: () => void }) {
           borderColor: C.line,
           boxShadow: "0 24px 60px rgba(40,26,12,0.34)",
         }}
-        contentStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 20 }}
+        contentStyle={{
+          paddingHorizontal: 18,
+          paddingTop: 16,
+          paddingBottom: 20,
+        }}
       >
         <View
           style={{
@@ -527,77 +555,58 @@ export function HelpPanel(props: { kind?: GameKind; onClose: () => void }) {
                 marginTop: 2,
               }}
             >
-              {go()
-                ? "围棋 · 中国规则 · 贴 7.5 子"
-                : "五子棋 · 15 × 15 · 无禁手"}
+              {gameName(active()) + " · 规则与教学"}
             </Text>
           </View>
-          <PressButton label="关闭" testID="help-close" onPress={props.onClose} />
+          <PressButton
+            label="关闭"
+            testID="help-close"
+            onPress={props.onClose}
+          />
         </View>
 
         <View
           style={{
             flexDirection: "row",
-            backgroundColor: "rgba(58,40,22,0.07)",
-            borderRadius: 12,
-            padding: 3,
-            gap: 3,
-            marginTop: 13,
+            flexWrap: "wrap",
+            gap: 6,
+            marginTop: 12,
           }}
         >
-          <View
-            role="button"
-            testID="help-tab-gomoku"
-            accessibilityState={{ selected: !go() }}
-            onPress={() => active.set("gomoku")}
-            style={{
-              flex: 1,
-              paddingVertical: 7,
-              borderRadius: 9,
-              alignItems: "center",
-              backgroundColor: !go() ? C.panel : "transparent",
-              boxShadow: !go() ? "0 1px 3px rgba(58,40,22,0.16)" : "none",
-            }}
-            activeStyle={{ opacity: 0.7 }}
-          >
-            <Text
-              style={{
-                fontSize: 12.5,
-                fontWeight: "600",
-                color: !go() ? C.ink : C.muted,
-              }}
-            >
-              五子棋
-            </Text>
-          </View>
-          <View
-            role="button"
-            testID="help-tab-go"
-            accessibilityState={{ selected: go() }}
-            onPress={() => active.set("go")}
-            style={{
-              flex: 1,
-              paddingVertical: 7,
-              borderRadius: 9,
-              alignItems: "center",
-              backgroundColor: go() ? C.panel : "transparent",
-              boxShadow: go() ? "0 1px 3px rgba(58,40,22,0.16)" : "none",
-            }}
-            activeStyle={{ opacity: 0.7 }}
-          >
-            <Text
-              style={{
-                fontSize: 12.5,
-                fontWeight: "600",
-                color: go() ? C.ink : C.muted,
-              }}
-            >
-              围棋
-            </Text>
-          </View>
+          <Each of={GAMES}>
+            {(g) => (
+              <PressButton
+                label={g().name}
+                testID={`help-tab-${g().kind}`}
+                tone={active() === g().kind ? "primary" : "default"}
+                onPress={() => active.set(g().kind)}
+              />
+            )}
+          </Each>
         </View>
-
-        {go() ? <GoHelp /> : <GomokuHelp />}
+        <Text
+          style={{ color: C.ink, fontSize: 14, lineHeight: 22, marginTop: 14 }}
+        >
+          {GUIDES[active()].intro}
+        </Text>
+        <Each of={GUIDES[active()].rules}>
+          {(r) => (
+            <Section title={r().title}>
+              <Para>{r().text}</Para>
+            </Section>
+          )}
+        </Each>
+        <Section title="操作引导">
+          <Each of={GUIDES[active()].steps}>
+            {(text, i) => (
+              <Para>
+                {i() + 1}. {text()}
+              </Para>
+            )}
+          </Each>
+        </Section>
+        <Para>规则参考：{GUIDES[active()].source}</Para>
+        {go() ? <GoHelp /> : active() === "gomoku" ? <GomokuHelp /> : null}
       </Scroll>
     </View>
   );

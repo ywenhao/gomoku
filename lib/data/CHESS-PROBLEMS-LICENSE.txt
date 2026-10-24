@@ -1,0 +1,7 @@
+Lichess Puzzle Database
+Source: https://database.lichess.org/#puzzles
+License: Creative Commons CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+Downloaded 2026-10-24. Curated by rating, popularity, theme and line length.
+FEN describes the position before the opponent's first move; the player solves
+the remaining line. Lichess IDs are retained for attribution and traceability.

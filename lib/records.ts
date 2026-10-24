@@ -3,6 +3,8 @@
  * 随时打开逐步回放；五子棋和围棋共用一份列表。
  */
 
+import { GAMES, gameName } from "./catalog";
+import { replayMatch, type Action } from "./multigame";
 import {
   SIZE,
   other,
@@ -21,6 +23,8 @@ export interface StoredRecord {
   level: Difficulty;
   goSize?: GoSize;
   moves: Move[];
+  actions?: Action[];
+  initialBoard?: number[];
   goMoves?: GoMove[];
   result?: string;
   savedAt: number;
@@ -35,6 +39,8 @@ export interface RecordInput {
   level: Difficulty;
   goSize?: GoSize;
   moves?: Move[];
+  actions?: Action[];
+  initialBoard?: number[];
   goMoves?: GoMove[];
   result?: string;
   name?: string;
@@ -56,10 +62,11 @@ export function makeRecord(input: RecordInput): StoredRecord {
     moves: input.game === "go" ? [] : (input.moves ?? []),
     goMoves: input.game === "go" ? (input.goMoves ?? []) : undefined,
     result,
+    actions: input.actions,
+    initialBoard: input.initialBoard,
     savedAt,
   };
 }
-
 
 const MODES: readonly Mode[] = ["pve", "pvp", "aiai"];
 const LEVELS: readonly Difficulty[] = ["easy", "normal", "hard", "hell"];
@@ -83,7 +90,7 @@ export function recordTitle(
   const d = new Date(at);
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
   const stamp = `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  const name = game === "go" ? "围棋" : "五子棋";
+  const name = gameName(game);
   const lv =
     level === "easy"
       ? "简单"
@@ -139,7 +146,9 @@ export function readRecords(raw: string | null): StoredRecord[] {
     if (!item || typeof item !== "object") continue;
     const data = item as Record<string, unknown>;
     if (typeof data.id !== "string" || data.id.length === 0) continue;
-    const game: GameKind = data.game === "go" ? "go" : "gomoku";
+    if (data.game !== undefined && !GAMES.some((g) => g.kind === data.game))
+      continue;
+    const game: GameKind = (data.game ?? "gomoku") as GameKind;
     const savedAt =
       typeof data.savedAt === "number" && Number.isFinite(data.savedAt)
         ? data.savedAt
@@ -151,6 +160,25 @@ export function readRecords(raw: string | null): StoredRecord[] {
     const name =
       typeof data.name === "string" ? data.name.trim().slice(0, 60) : "";
 
+    if (game !== "go" && game !== "gomoku") {
+      if (!Array.isArray(data.actions)) continue;
+      const initialBoard = data.initialBoard as number[] | undefined;
+      if (initialBoard !== undefined && !Array.isArray(initialBoard)) continue;
+      if (!replayMatch(game, data.actions as Action[], initialBoard)) continue;
+      out.push({
+        id: data.id,
+        name: name || recordTitle(game, level, savedAt, result),
+        game,
+        mode,
+        level,
+        moves: [],
+        actions: data.actions as Action[],
+        initialBoard,
+        result,
+        savedAt,
+      });
+      continue;
+    }
     if (game === "go") {
       if (!Array.isArray(data.goMoves) || data.goMoves.length === 0) continue;
       const size = GO_SIZES.includes(data.goSize as GoSize)
@@ -207,12 +235,22 @@ export function readRecords(raw: string | null): StoredRecord[] {
 
 /** 记录里的最后一手颜色：用于棋谱回放的下一手提示。 */
 export function recordNextPlayer(record: StoredRecord): 1 | 2 {
+  if (record.actions)
+    return Math.min(
+      2,
+      replayMatch(
+        record.game as Exclude<GameKind, "gomoku" | "go">,
+        record.actions,
+        record.initialBoard,
+      )?.state.turn ?? 1,
+    ) as 1 | 2;
   const list = record.game === "go" ? (record.goMoves ?? []) : record.moves;
   const last = list[list.length - 1];
   return last ? other(last.p) : 1;
 }
 
 export function recordMoveCount(record: StoredRecord): number {
+  if (record.actions) return record.actions.length;
   return record.game === "go"
     ? (record.goMoves?.length ?? 0)
     : record.moves.length;

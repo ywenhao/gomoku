@@ -1,11 +1,10 @@
+import { GAMES, gameName, gameMeta, isComplexGame } from "../lib/catalog";
+import { formatClock, sideOf, TIME_CONTROLS } from "../lib/clock";
+import { savedMoveCount } from "../lib/save";
 import { Scroll, Text, View } from "nsh";
 import { C, ConfirmButton, PressButton, Segmented, StoneDot } from "./ui";
 import { formatDuration, formatStamp } from "../lib/score";
-import type {
-  Difficulty,
-  GameKind,
-  Mode,
-} from "../lib/gomoku";
+import type { Difficulty, GameKind, Mode } from "../lib/gomoku";
 import type { GoSize } from "../lib/go";
 import type { SavedGame } from "../lib/save";
 
@@ -58,7 +57,7 @@ function SectionTitle(props: { text: string }) {
 }
 
 function savedLabel(saved: SavedGame): string {
-  const name = saved.kind === "go" ? "围棋" : "五子棋";
+  const name = gameName(saved.kind);
   const who =
     saved.mode === "pve"
       ? `人机 · ${LEVEL_NAME[saved.level]}`
@@ -67,12 +66,11 @@ function savedLabel(saved: SavedGame): string {
         : "本地双人";
   const size = saved.kind === "go" ? ` · ${saved.goSize ?? 19} 路` : "";
   const clock = saved.limitOn
-    ? ` · 剩 ${formatDuration(Math.max(3, Math.ceil(saved.leftMs / 1000)))}`
+    ? saved.clock
+      ? ` · 剩 ${formatClock(sideOf(saved.clock, saved.clock.turn), saved.clock.control)}`
+      : ` · 剩 ${formatDuration(Math.max(3, Math.ceil(saved.leftMs / 1000)))}`
     : "";
-  const count =
-    saved.kind === "go"
-      ? (saved.goMoves?.length ?? 0)
-      : saved.moves.length;
+  const count = savedMoveCount(saved);
   return `${name}${size} · ${who} · ${count} 手${clock}`;
 }
 
@@ -92,7 +90,9 @@ function KindCard(props: {
       accessibilityState={{ selected: props.selected }}
       onPress={props.onPress}
       style={{
-        flex: 1,
+        flexGrow: 1,
+        flexBasis: "45%",
+        minWidth: 140,
         paddingVertical: 12,
         paddingHorizontal: 13,
         borderRadius: 16,
@@ -193,9 +193,7 @@ function Entry(props: {
               backgroundColor: C.accentSoft,
             }}
           >
-            <Text
-              style={{ fontSize: 8.5, fontWeight: "700", color: C.accent }}
-            >
+            <Text style={{ fontSize: 8.5, fontWeight: "700", color: C.accent }}>
               {props.badge ?? ""}
             </Text>
           </View>
@@ -213,6 +211,8 @@ export function Home(props: {
   saved: SavedGame | null;
   kind: GameKind;
   goSize: GoSize;
+  timeControl: string;
+  onTimeControl: (id: string) => void;
   mode: Mode;
   level: Difficulty;
   limitOn: boolean;
@@ -286,30 +286,26 @@ export function Home(props: {
               marginTop: 3,
             }}
           >
-            YI JING · 围棋与五子棋
+            YI JING · 八种棋类
           </Text>
           <Text style={{ fontSize: 11.5, color: C.muted, marginTop: 7 }}>
             一枰天地 · 与 AI 手谈 · 从残局与课程入门
           </Text>
         </View>
 
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <KindCard
-            kind="gomoku"
-            selected={props.kind === "gomoku"}
-            title="五子棋"
-            latin="GOMOKU · 15 × 15"
-            desc="五连即胜，节奏明快"
-            onPress={() => props.onKind("gomoku")}
-          />
-          <KindCard
-            kind="go"
-            selected={props.kind === "go"}
-            title="围棋"
-            latin="GO · 9 / 13 / 19"
-            desc="围地提子，变化无穷"
-            onPress={() => props.onKind("go")}
-          />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+          <Each of={GAMES}>
+            {(g) => (
+              <KindCard
+                kind={g().kind}
+                selected={props.kind === g().kind}
+                title={g().name}
+                latin={g().latin + " · " + g().board}
+                desc={g().desc}
+                onPress={() => props.onKind(g().kind)}
+              />
+            )}
+          </Each>
         </View>
 
         <View
@@ -329,9 +325,7 @@ export function Home(props: {
             else={
               <View style={{ gap: 9 }}>
                 <PressButton
-                  label={
-                    props.kind === "go" ? "开始围棋对弈" : "开始五子棋"
-                  }
+                  label={"开始" + gameName(props.kind)}
                   subLabel={
                     props.mode === "aiai"
                       ? "AI 对 AI · 约 2 秒一手"
@@ -419,14 +413,26 @@ export function Home(props: {
             <Entry
               testID="home-tsumego"
               title="残局挑战"
-              sub={`${props.tsumegoDone} / ${props.tsumegoTotal} 道已解`}
-              badge="围棋"
+              sub={
+                props.kind === "chess" || props.kind === "xiangqi"
+                  ? "实用残局、杀法与战术题库"
+                  : `${props.tsumegoDone} / ${props.tsumegoTotal} 道已解`
+              }
+              badge={
+                props.kind === "chess" || props.kind === "xiangqi"
+                  ? gameName(props.kind)
+                  : "围棋"
+              }
               onPress={props.onTsumego}
             />
             <Entry
               testID="home-learn"
               title="学棋"
-              sub={`${props.learnDone} / ${props.learnTotal} 课 · 按段位进阶`}
+              sub={
+                props.kind === "go"
+                  ? `${props.learnDone} / ${props.learnTotal} 课 · 按段位进阶`
+                  : gameMeta(props.kind).learn + " · 操作引导与测验"
+              }
               onPress={props.onLearn}
             />
             <Entry
@@ -508,7 +514,7 @@ export function Home(props: {
               }}
             >
               <Text style={{ fontSize: 13.5, color: C.ink }}>
-                限时落子 30 秒
+                {isComplexGame(props.kind) ? "比赛棋钟" : "每回合30秒"}
               </Text>
               <Segmented
                 value={() => (props.limitOn ? "on" : "off")}
@@ -517,6 +523,28 @@ export function Home(props: {
                 compact
               />
             </View>
+            <If when={isComplexGame(props.kind)}>
+              <View style={{ gap: 6 }}>
+                <Text style={{ color: C.ink, fontSize: 13 }}>
+                  时间规则（新对局生效）
+                </Text>
+                <Each of={TIME_CONTROLS[props.kind]}>
+                  {(t) => (
+                    <PressButton
+                      label={t().label}
+                      tone={
+                        props.timeControl === t().id ? "primary" : "default"
+                      }
+                      testID={`clock-${t().id}`}
+                      onPress={() => props.onTimeControl(t().id)}
+                    />
+                  )}
+                </Each>
+                <Text style={{ color: C.muted, fontSize: 11, lineHeight: 18 }}>
+                  主时间按双方分别累计，超时按规则判负；具体赛事时限由规程指定。
+                </Text>
+              </View>
+            </If>
             <View
               style={{
                 flexDirection: "row",
@@ -565,7 +593,7 @@ export function Home(props: {
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 13, color: C.ink }}>玩法与帮助</Text>
               <Text style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
-                五子棋棋型、围棋规则、提子与数子
+                {gameMeta(props.kind).learn}
               </Text>
             </View>
             <PressButton

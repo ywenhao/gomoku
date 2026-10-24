@@ -10,6 +10,7 @@
 
 import { exists, mkdir, writeFile } from "fs/promises";
 import { join } from "path";
+import { CHECK_VOICE } from "./data/check-voice";
 import { platform } from "nsh/device";
 
 export const SOUND_RATE = 22050;
@@ -21,6 +22,7 @@ export const SOUND_NAMES = [
   "win",
   "loss",
   "draw",
+  "check",
 ] as const;
 
 export type SoundName = (typeof SOUND_NAMES)[number];
@@ -33,6 +35,7 @@ export const SOUND_SECONDS: Record<SoundName, number> = {
   win: 0.78,
   loss: 0.82,
   draw: 0.6,
+  check: 1.5119727891156463,
 };
 
 /** 每种音效的峰值音量：落子/胜利用力一点，倒计时滴答轻一点。 */
@@ -43,6 +46,7 @@ const SOUND_PEAK: Record<SoundName, number> = {
   win: 0.8,
   loss: 0.68,
   draw: 0.6,
+  check: 1.6,
 };
 
 const TAU = Math.PI * 2;
@@ -72,7 +76,8 @@ function renderPlace(n: number): Float64Array {
     low = low * 0.78 + click * 0.22;
     const body = Math.sin(TAU * 185 * t) * Math.exp(-t * 26) * 0.46;
     const wood = Math.sin(TAU * 372 * t) * Math.exp(-t * 42) * 0.2;
-    out[i] = (low * Math.exp(-t * 52) * 0.9 + body + wood) * Math.min(1, t / 0.002);
+    out[i] =
+      (low * Math.exp(-t * 52) * 0.9 + body + wood) * Math.min(1, t / 0.002);
   }
   return out;
 }
@@ -84,8 +89,7 @@ function renderTick(n: number): Float64Array {
     const t = i / SOUND_RATE;
     const env = decayEnv(t, 0.003, 46);
     out[i] =
-      (Math.sin(TAU * 1046.5 * t) * 0.5 +
-        Math.sin(TAU * 2093 * t) * 0.14) *
+      (Math.sin(TAU * 1046.5 * t) * 0.5 + Math.sin(TAU * 2093 * t) * 0.14) *
       env;
   }
   return out;
@@ -104,10 +108,7 @@ function renderTimeout(n: number): Float64Array {
       Math.sin(phase * 2) * 0.2 +
       Math.sin(TAU * f * t) * 0.12;
     out[i] =
-      tone *
-      gate *
-      Math.min(1, t / 0.012) *
-      Math.min(1, (0.62 - t) / 0.09);
+      tone * gate * Math.min(1, t / 0.012) * Math.min(1, (0.62 - t) / 0.09);
   }
   return out;
 }
@@ -124,7 +125,10 @@ function renderNotes(seconds: number, notes: readonly Note[]): Float64Array {
   const out = new Float64Array(n);
   for (const note of notes) {
     const first = Math.max(0, Math.floor(note.start * SOUND_RATE));
-    const last = Math.min(n, Math.ceil((note.start + note.length) * SOUND_RATE));
+    const last = Math.min(
+      n,
+      Math.ceil((note.start + note.length) * SOUND_RATE),
+    );
     for (let i = first; i < last; i++) {
       const t = i / SOUND_RATE - note.start;
       const env =
@@ -183,6 +187,8 @@ function render(name: SoundName): Float64Array {
       return renderWin();
     case "loss":
       return renderLoss();
+    case "check":
+      return renderTick(Math.round(SOUND_RATE * 0.1));
     case "draw":
       return renderDraw();
   }
@@ -225,13 +231,34 @@ function encodeWav(samples: Float64Array, peak: number): Uint8Array {
   return bytes;
 }
 
+function decodeVoice(text: string): Uint8Array {
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const out: number[] = [];
+  let bits = 0,
+    value = 0;
+  for (const c of text) {
+    const n = alphabet.indexOf(c);
+    if (n < 0) break;
+    value = (value << 6) | n;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((value >> bits) & 255);
+    }
+  }
+  return new Uint8Array(out);
+}
 const cache = new Map<SoundName, Uint8Array>();
 
 /** 合成一个音效的完整 WAV 字节；同一个音效只算一次。 */
 export function synthesizeSound(name: SoundName): Uint8Array {
   const hit = cache.get(name);
   if (hit) return hit;
-  const wav = encodeWav(render(name), SOUND_PEAK[name]);
+  const wav =
+    name === "check"
+      ? decodeVoice(CHECK_VOICE)
+      : encodeWav(render(name), SOUND_PEAK[name]);
   cache.set(name, wav);
   return wav;
 }
@@ -240,15 +267,14 @@ export function synthesizeSound(name: SoundName): Uint8Array {
  * 可播放的地址，按平台只准备一次。某个音效准备失败只会少了那一个，
  * 不会影响游戏本身（静音也能玩）。
  */
-export async function soundUrls(): Promise<
-  Partial<Record<SoundName, string>>
-> {
+export async function soundUrls(): Promise<Partial<Record<SoundName, string>>> {
   const urls: Partial<Record<SoundName, string>> = {};
 
   if (platform.os === "web") {
     for (const name of SOUND_NAMES) {
-      const blob = new Blob([synthesizeSound(name)], { type: "audio/wav" });
-      urls[name] = URL.createObjectURL(blob);
+      // A data URI also works on nsh hosts that cannot transfer their QuickJS blob URLs to the browser.
+      urls[name] =
+        "data:audio/wav;base64," + encodeBase64(synthesizeSound(name));
     }
     return urls;
   }
@@ -275,6 +301,24 @@ export async function soundUrls(): Promise<
     }
   }
   return urls;
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i],
+      b = bytes[i + 1] ?? 0,
+      c = bytes[i + 2] ?? 0;
+    chunks.push(
+      alphabet[a >> 2] +
+        alphabet[((a & 3) << 4) | (b >> 4)] +
+        (i + 1 < bytes.length ? alphabet[((b & 15) << 2) | (c >> 6)] : "=") +
+        (i + 2 < bytes.length ? alphabet[c & 63] : "="),
+    );
+  }
+  return chunks.join("");
 }
 
 let pending: Promise<Partial<Record<SoundName, string>>> | null = null;

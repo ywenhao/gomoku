@@ -1,6 +1,7 @@
 import { expect, open, test } from "nsh/test";
 
-const has = (texts: string[], part: string) => texts.some((t) => t.includes(part));
+const has = (texts: string[], part: string) =>
+  texts.some((t) => t.includes(part));
 
 const launch = (extra: Record<string, unknown> = {}) =>
   open("./App.tsx", { storage: {}, ...extra });
@@ -25,7 +26,7 @@ test("首页是「弈境」：多棋类入口、人机大战、残局、学棋�
   const app = await launch();
   const texts = app.texts();
   expect(texts).toContain("弈境");
-  expect(has(texts, "围棋与五子棋")).toBe(true);
+  expect(has(texts, "八种棋类")).toBe(true);
   expect(texts).toContain("五子棋");
   expect(texts).toContain("围棋");
   expect(has(texts, "人机大战")).toBe(true);
@@ -52,14 +53,14 @@ test("围棋帮助有独立的图文规则，五子棋标签仍可切回", async
   await app.press("id:home-help");
   await app.waitFor("id:help-panel");
   let texts = app.texts();
-  expect(has(texts, "围棋 · 中国规则")).toBe(true);
+  expect(has(texts, "围棋 · 规则与教学")).toBe(true);
   for (const word of ["气", "提子", "打劫", "数子", "胜负"]) {
     expect(has(texts, word)).toBe(true);
   }
   expect(app.shows("id:help-tab-go")).toBe(true);
 
   await app.press("id:help-tab-gomoku");
-  await app.waitUntil(() => has(app.texts(), "五子棋 · 15 × 15"));
+  await app.waitUntil(() => has(app.texts(), "五子棋 · 规则与教学"));
   const gomokuTexts = app.texts();
   expect(has(gomokuTexts, "活四")).toBe(true);
   expect(has(gomokuTexts, "VCF")).toBe(true);
@@ -96,7 +97,7 @@ test("围棋 9 路对局：落子、悔棋、两次虚手进入数子并可确�
   await app.waitUntil(() => has(app.texts(), "死子已标记 1 颗"));
   await app.press("id:go-score-confirm");
   await app.waitFor("id:go-result-close");
-  expect(has(app.texts(), "子胜")).toBe(true);
+  expect(has(app.texts(), "点胜")).toBe(true);
 
   await app.press("id:go-result-save");
   await app.waitUntil(() => {
@@ -309,6 +310,7 @@ test("残局挑战：筛选、提示、错手不污染棋盘，解出后记录�
 
 test("学棋：按段位选路线，完成小测才记录进度并可进入下一课", async () => {
   const app = await launch();
+  await app.press("id:seg-game-go");
   await app.press("id:home-learn");
   await app.waitFor("id:learn-screen");
   let texts = app.texts();

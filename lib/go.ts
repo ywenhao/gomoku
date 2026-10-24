@@ -1,7 +1,7 @@
 /**
  * 围棋核心规则（纯函数，无副作用）。
  *
- * 采用中国规则（数子法）：黑先、白贴 7.5 子；禁止自杀、禁止立即打劫；
+ * 采用中国规则（数子法）：黑先、白贴 7.5 点（3¾子）；禁止自杀、禁止立即打劫；
  * 连续两次虚手进入数子。棋盘用一维数组表示，index = y * size + x。
  */
 
@@ -25,6 +25,7 @@ export interface GoState {
   captures: { 1: number; 2: number };
   ko: number;
   passes: number;
+  positions: string[];
 }
 
 export interface GoResult {
@@ -82,6 +83,7 @@ export function createGoState(size: GoSize = 19): GoState {
     captures: { 1: 0, 2: 0 },
     ko: -1,
     passes: 0,
+    positions: [createGoBoard(size).join("")],
   };
 }
 
@@ -159,7 +161,7 @@ export function playGo(
   player: Player,
   ko = -1,
 ): GoPlayResult {
-  if (x < 0 || y < 0 || x >= size || y >= size) {
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= size || y >= size) {
     return { ok: false, reason: "occupied", board: board.slice(), captured: [], ko };
   }
   const i = goIdx(x, y, size);
@@ -208,10 +210,11 @@ export function goStateFromMoves(
   let passes = 0;
   const captures = { 1: 0, 2: 0 };
   const list: GoMove[] = [];
+  const positions: string[] = [board.join("")];
 
   for (let n = 0; n < moves.length; n++) {
     const m = moves[n];
-    if (!m || (m.p !== 1 && m.p !== 2)) return null;
+    if (!m || m.p !== (n%2===0?1:2) || typeof m.pass !== "boolean") return null;
     if (m.pass) {
       passes++;
       ko = -1;
@@ -219,7 +222,8 @@ export function goStateFromMoves(
       continue;
     }
     const r = playGo(board, size, m.x, m.y, m.p, ko);
-    if (!r.ok) return null;
+    if (!r.ok || positions.includes(r.board.join(""))) return null;
+    positions.push(r.board.join(""));
     board = r.board;
     ko = r.ko;
     passes = 0;
@@ -227,7 +231,7 @@ export function goStateFromMoves(
     list.push({ x: m.x, y: m.y, p: m.p, pass: false });
   }
 
-  return { size, board, moves: list, captures, ko, passes };
+  return { size, board, moves: list, captures, ko, passes, positions };
 }
 
 /** 显示用坐标：D4。跳过 I，列从 A 开始；行从下往上数。 */
@@ -237,6 +241,7 @@ export function goCoord(x: number, y: number, size: number): string {
 }
 
 export interface GoScoreDetail {
+  reason?: string;
   blackStones: number;
   whiteStones: number;
   blackTerritory: number;
@@ -313,9 +318,10 @@ export function scoreGo(
 
 /** 把结果转成一句中文，例如「黑棋 3.5 子胜」。 */
 export function goResultText(result: GoScoreDetail): string {
+  if (result.reason) return `${result.winner === 1 ? "黑棋" : result.winner === 2 ? "白棋" : "双方"} · ${result.reason}`;
   if (result.winner === 0) return "和棋";
   const side = result.winner === 1 ? "黑棋" : "白棋";
-  return `${side} ${result.margin.toFixed(1)} 子胜`;
+  return `${side} ${result.margin.toFixed(1)} 点胜`;
 }
 
 /** 9/13/19 路星位（含天元）。 */

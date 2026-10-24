@@ -8,6 +8,17 @@ import {
   View,
   type Accessor,
 } from "nsh";
+import { GuideStrip } from "./Guide";
+import {
+  createClock,
+  restoreClock,
+  findTimeControl,
+  clockAfterMove,
+  tickClock,
+  formatClock,
+  remainingMs,
+  sideOf,
+} from "../lib/clock";
 import { Board } from "./Board";
 import { MenuPanel } from "./Menu";
 import { C, PressButton, StoneDot } from "./ui";
@@ -17,6 +28,7 @@ import {
   goOther,
   goResultText,
   goStars,
+  goGroup,
   goStateFromMoves,
   playGo,
   scoreGo,
@@ -41,6 +53,8 @@ export interface GoFinish {
   outcome: Outcome;
   moves: number;
   seconds: number;
+  undos?: number;
+  timeouts?: number;
 }
 
 const NO_LINE: number[] = [];
@@ -61,6 +75,7 @@ const MODE_NAME: Record<Mode, string> = {
 /** 围棋对局。从 App 挂载时一次性初始化，之后自己管理棋盘与 AI。 */
 export function GoGame(props: {
   initial: SavedGame | null;
+  timeControl: string;
   mode: Mode;
   level: Difficulty;
   limitOn: boolean;
@@ -109,13 +124,13 @@ export function GoGame(props: {
   const level = signal<Difficulty>(initialGame?.level ?? props.level);
   const limitOn = signal<boolean>(initialGame?.limitOn ?? props.limitOn);
 
-  const paused = signal(false);
+  const paused = signal(initialGame?.scoring ?? false);
   const thinking = signal(false);
-  const scoring = signal(false);
+  const scoring = signal(initialGame?.scoring ?? false);
   const over = signal<GoScoreDetail | null>(null);
   const resultOpen = signal(false);
   const resultSeconds = signal(0);
-  const dead = signal<number[]>([]);
+  const dead = signal<number[]>(initialGame?.dead ?? []);
   const deadMode = signal(false);
   const menu = signal(false);
   const notice = signal<string | null>(null);
@@ -133,6 +148,22 @@ export function GoGame(props: {
     ),
   );
   const boardSize = signal(0);
+  const control = findTimeControl(
+    "go",
+    initialGame?.timeControl ?? props.timeControl,
+  );
+  const clock = signal(
+    restoreClock(
+      "go",
+      initialGame?.clock,
+      initial?.moves.length && initial.moves.length % 2 ? 2 : 1,
+    ) ??
+      createClock(
+        control,
+        initial?.moves.length && initial.moves.length % 2 ? 2 : 1,
+      ),
+  );
+  const positions = signal(initial?.positions ?? [board().join("")]);
 
   const turn = computed<Player>(() => {
     const list = moves();
@@ -162,14 +193,25 @@ export function GoGame(props: {
       !paused() &&
       !resultOpen() &&
       reviewAt() === null &&
-      (mode() === "pvp" || turn() === 1),
+      !menu() &&
+      !props.helpOpen &&
+      !replaying(),
   );
 
   const secondsLeft = computed(() => Math.max(0, Math.ceil(leftMs() / 1000)));
   const timeRatio = computed(() =>
     over() !== null
       ? 0
-      : Math.max(0, Math.min(1, leftMs() / (MOVE_SECONDS * 1000))),
+      : Math.max(
+          0,
+          Math.min(
+            1,
+            leftMs() /
+              (sideOf(clock(), clock().turn).mainMs > 0
+                ? control.mainMs
+                : control.byoyomiMs),
+          ),
+        ),
   );
 
   const viewMoves = computed(() => {
@@ -189,9 +231,7 @@ export function GoGame(props: {
     return last && !last.pass ? last.y * size() + last.x : -1;
   });
 
-  const scoreDetail = computed(() =>
-    scoreGo(board(), size(), dead(), GO_KOMI),
-  );
+  const scoreDetail = computed(() => scoreGo(board(), size(), dead(), GO_KOMI));
 
   const moveCount = computed(() => moves().length);
   const lastMove = computed(() => {
@@ -232,6 +272,12 @@ export function GoGame(props: {
       board.set(state.board);
       ko.set(state.ko);
       passes.set(state.passes);
+      positions.set(state.positions);
+      clock.update((c) => ({
+        ...c,
+        turn: state.moves.length % 2 ? 2 : 1,
+        lastAt: Date.now(),
+      }));
       captures.set(state.captures);
     });
   }
@@ -259,6 +305,8 @@ export function GoGame(props: {
       startedAt.set(0);
       leftMs.set(MOVE_SECONDS * 1000);
       menu.set(false);
+      clock.set(createClock(control));
+      positions.set([createGoBoard(size()).join("")]);
     });
   }
 
@@ -288,8 +336,14 @@ export function GoGame(props: {
       );
       return;
     }
+    if (positions().includes(r.board.join(""))) {
+      flash("全局同形再现：请选择其他落点");
+      return;
+    }
+    if (!advanceClock(p)) return;
     const at = moves().length;
     batch(() => {
+      positions.update((v) => v.concat([r.board.join("")]));
       if (at === 0) startedAt.set(Date.now());
       moves.update((list) => list.concat([{ x, y, p, pass: false }]));
       board.set(r.board);
@@ -307,12 +361,11 @@ export function GoGame(props: {
 
   function doPass() {
     const p = turn();
+    if (!advanceClock(p)) return;
     const nextPasses = passes() + 1;
     batch(() => {
       if (moves().length === 0) startedAt.set(Date.now());
-      moves.update((list) =>
-        list.concat([{ x: -1, y: -1, p, pass: true }]),
-      );
+      moves.update((list) => list.concat([{ x: -1, y: -1, p, pass: true }]));
       ko.set(-1);
       passes.set(nextPasses);
       reviewAt.set(null);
@@ -328,21 +381,58 @@ export function GoGame(props: {
     doPass();
   }
 
-  function timeoutPass() {
+  function timeoutLoss(p: Player) {
+    if (over()) return;
     timeouts.update((n) => n + 1);
-    flash("超时 · 自动虚手");
     props.playSound("timeout");
-    doPass();
+    const detail = {
+      ...scoreGo(board(), size(), [], GO_KOMI),
+      winner: goOther(p),
+      reason: "超时判负",
+    };
+    const seconds = Math.max(
+      1,
+      Math.round((Date.now() - (startedAt() || Date.now())) / 1000),
+    );
+    batch(() => {
+      over.set(detail);
+      paused.set(true);
+      resultOpen.set(true);
+      resultSeconds.set(seconds);
+      scoring.set(false);
+    });
+    props.onFinish({
+      result: goResultText(detail),
+      outcome: mode() === "pve" ? (p === 1 ? "loss" : "win") : "draw",
+      moves: moves().length,
+      undos: undos(),
+      timeouts: timeouts(),
+      seconds,
+    });
+  }
+  function advanceClock(p: Player): boolean {
+    if (!limitOn() || mode() === "aiai") {
+      clock.update((c) => ({ ...c, turn: goOther(p), lastAt: Date.now() }));
+      return true;
+    }
+    const r = clockAfterMove(clock(), p, Date.now());
+    clock.set(r.clock);
+    if (r.timeout !== null) {
+      timeoutLoss(r.timeout);
+      return false;
+    }
+    return true;
   }
 
   function playAt(i: number) {
     if (scoring()) {
       if (deadMode()) {
         if (board()[i] === 0) return;
+        const group = goGroup(board(), size(), i)?.stones ?? [i];
         dead.update((list) =>
-          list.indexOf(i) === -1
-            ? list.concat([i])
-            : list.filter((x) => x !== i),
+          list.includes(i)
+            ? list.filter((x) => !group.includes(x))
+            : [...new Set(list.concat(group))],
         );
         return;
       }
@@ -361,8 +451,7 @@ export function GoGame(props: {
     const list = moves();
     if (list.length === 0) return;
     const last = list[list.length - 1];
-    const drop =
-      mode() === "pve" && last.p === 2 && list.length >= 2 ? 2 : 1;
+    const drop = mode() === "pve" && last.p === 2 && list.length >= 2 ? 2 : 1;
     const kept = list.slice(0, Math.max(0, list.length - drop));
     batch(() => {
       round.update((n) => n + 1);
@@ -384,7 +473,9 @@ export function GoGame(props: {
   function resumeAfterScore() {
     const list = moves();
     const kept =
-      list.length >= 2 && list[list.length - 1].pass && list[list.length - 2].pass
+      list.length >= 2 &&
+      list[list.length - 1].pass &&
+      list[list.length - 2].pass
         ? list.slice(0, -2)
         : list;
     batch(() => {
@@ -428,6 +519,8 @@ export function GoGame(props: {
       result: goResultText(detail),
       outcome,
       moves: moves().length,
+      undos: undos(),
+      timeouts: timeouts(),
       seconds,
     });
     props.playSound(
@@ -539,7 +632,7 @@ export function GoGame(props: {
 
   function snapshot(): SavedGame | null {
     const list = moves();
-    if (list.length === 0 || over() !== null || scoring()) return null;
+    if (list.length === 0 || over() !== null) return null;
     return {
       kind: "go",
       moves: [],
@@ -553,6 +646,10 @@ export function GoGame(props: {
       timeouts: timeouts(),
       startedAt: startedAt(),
       savedAt: Date.now(),
+      clock: untracked(() => clock()),
+      timeControl: control.id,
+      scoring: scoring(),
+      dead: dead(),
     };
   }
 
@@ -614,7 +711,10 @@ export function GoGame(props: {
       if (untracked(() => props.helpOpen)) return;
 
       // 人机大战下到很晚仍无胜负时，主动虚手结束，避免无限对局。
-      if (md === "aiai" && untracked(() => moves().length) > size() * size() * 1.5) {
+      if (
+        md === "aiai" &&
+        untracked(() => moves().length) > size() * size() * 1.5
+      ) {
         thinking.set(false);
         untracked(doPass);
         return;
@@ -664,6 +764,44 @@ export function GoGame(props: {
       if (untracked(() => menu())) return;
       thinking.set(false);
 
+      if (choice && !choice.pass) {
+        const chosen = playGo(
+          untracked(board),
+          untracked(size),
+          choice.x,
+          choice.y,
+          untracked(turn),
+          untracked(ko),
+        );
+        if (
+          !chosen.ok ||
+          untracked(positions).includes(chosen.board.join(""))
+        ) {
+          choice = null;
+          for (let i = 0; i < untracked(board).length; i++) {
+            if (untracked(board)[i]) continue;
+            const trial = playGo(
+              untracked(board),
+              untracked(size),
+              i % untracked(size),
+              Math.floor(i / untracked(size)),
+              untracked(turn),
+              untracked(ko),
+            );
+            if (
+              trial.ok &&
+              !untracked(positions).includes(trial.board.join(""))
+            ) {
+              choice = {
+                x: i % untracked(size),
+                y: Math.floor(i / untracked(size)),
+                pass: false,
+              };
+              break;
+            }
+          }
+        }
+      }
       if (!choice || choice.pass) {
         untracked(doPass);
       } else {
@@ -693,54 +831,30 @@ export function GoGame(props: {
     return () => clearInterval(timer);
   });
 
-  // 倒计时：轮到人类时开始，菜单 / 帮助 / 数子 / 回放时暂停。
-  let deadline = 0;
-  let pausedLeft = 0;
+  // Both sides spend their own time, including AI. Local overlays pause without resetting it.
   effect(() => {
     const active = timed();
-    const pausedNow =
-      menu() ||
-      props.helpOpen ||
-      scoring() ||
-      over() !== null ||
-      reviewAt() !== null ||
-      replaying();
-    const r = round();
-
-    if (!active) {
-      deadline = 0;
-      pausedLeft = 0;
-      leftMs.set(MOVE_SECONDS * 1000);
-      return;
-    }
-    if (pausedNow) {
-      pausedLeft =
-        deadline > 0
-          ? Math.max(0, deadline - Date.now())
-          : untracked(() => leftMs());
-      deadline = 0;
-      return;
-    }
-
-    const start = pausedLeft > 0 ? pausedLeft : MOVE_SECONDS * 1000;
-    pausedLeft = 0;
-    deadline = Date.now() + start;
-    leftMs.set(start);
-
-    const timer = setInterval(() => {
-      const left = deadline - Date.now();
-      if (left > 0) {
-        leftMs.set(left);
-        return;
-      }
+    untracked(() => clock.update((c) => ({ ...c, lastAt: Date.now() })));
+    if (!active) return;
+    const timer = setInterval(
+      () =>
+        untracked(() => {
+          const r = tickClock(clock(), Date.now());
+          clock.set(r.clock);
+          leftMs.set(remainingMs(sideOf(r.clock, r.clock.turn)));
+          if (r.timeout !== null) timeoutLoss(r.timeout);
+        }),
+      100,
+    );
+    return () => {
       clearInterval(timer);
-      leftMs.set(0);
-      if (untracked(() => round()) !== r) return;
-      if (untracked(() => over()) !== null) return;
-      if (!untracked(() => timed())) return;
-      untracked(timeoutPass);
-    }, 100);
-    return () => clearInterval(timer);
+      untracked(() => {
+        const r = tickClock(clock(), Date.now());
+        clock.set(r.clock);
+        leftMs.set(remainingMs(sideOf(r.clock, r.clock.turn)));
+        if (r.timeout !== null && over() === null) timeoutLoss(r.timeout);
+      });
+    };
   });
 
   // 轻提示自动消失
@@ -797,7 +911,7 @@ export function GoGame(props: {
             }}
           >
             {MODE_NAME[mode()]} · {LEVEL_NAME[level()]} · {size()} 路 · 贴{" "}
-            {GO_KOMI} 子
+            {GO_KOMI} 点
           </Text>
         </View>
         <PressButton
@@ -843,6 +957,17 @@ export function GoGame(props: {
         </Text>
       </View>
 
+      <GuideStrip kind="go" />
+      <If when={limitOn() && mode() !== "aiai"}>
+        <View style={{ flexDirection: "row", gap: 12, marginVertical: 6 }}>
+          <Text testID="go-clock-black" style={{ color: C.ink, fontSize: 14 }}>
+            黑 {formatClock(clock().p1, control)}
+          </Text>
+          <Text testID="go-clock-white" style={{ color: C.ink, fontSize: 14 }}>
+            白 {formatClock(clock().p2, control)}
+          </Text>
+        </View>
+      </If>
       {/* 倒计时 */}
       <If when={limitOn() && mode() !== "aiai"}>
         <View
@@ -863,9 +988,7 @@ export function GoGame(props: {
               borderRadius: 4,
               borderWidth: 1,
               borderColor:
-                secondsLeft() <= 5 && timed()
-                  ? C.accent
-                  : "transparent",
+                secondsLeft() <= 5 && timed() ? C.accent : "transparent",
               backgroundColor: "rgba(58,40,22,0.10)",
               overflow: "hidden",
             }}
@@ -911,8 +1034,8 @@ export function GoGame(props: {
           }}
         >
           <Text style={{ fontSize: 10.5, color: C.accent, fontWeight: "600" }}>
-            {replaying() ? "整局回放中" : "回看模式"} · 第{" "}
-            {reviewAt() ?? 0} / {moveCount()} 手
+            {replaying() ? "整局回放中" : "回看模式"} · 第 {reviewAt() ?? 0} /{" "}
+            {moveCount()} 手
           </Text>
           <Text style={{ fontSize: 10.5, color: C.muted }}>
             点「继续」回到当前局面
@@ -1014,7 +1137,7 @@ export function GoGame(props: {
             }}
           >
             <Text style={{ fontSize: 13, fontWeight: "700", color: C.ink }}>
-              数子（白贴 {GO_KOMI} 子）
+              数子（白贴 {GO_KOMI} 点）
             </Text>
             <Text
               style={{
@@ -1030,8 +1153,7 @@ export function GoGame(props: {
           <Text style={{ fontSize: 10.5, color: C.muted, lineHeight: 15 }}>
             黑棋 {scoreDetail().blackStones} 子 + {scoreDetail().blackTerritory}{" "}
             空；白棋 {scoreDetail().whiteStones} 子 +{" "}
-            {scoreDetail().whiteTerritory} 空。死子已标记{" "}
-            {dead().length} 颗。
+            {scoreDetail().whiteTerritory} 空。死子已标记 {dead().length} 颗。
           </Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
             <PressButton
@@ -1204,7 +1326,10 @@ export function GoGame(props: {
               }}
             >
               <View
-                style={{ flexDirection: "row", justifyContent: "space-between" }}
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                }}
               >
                 <Text style={{ fontSize: 12.5, color: C.muted }}>
                   黑棋：{over()?.blackStones ?? 0} 子 +{" "}
@@ -1222,7 +1347,10 @@ export function GoGame(props: {
                 </Text>
               </View>
               <View
-                style={{ flexDirection: "row", justifyContent: "space-between" }}
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                }}
               >
                 <Text style={{ fontSize: 12.5, color: C.muted }}>
                   白棋：{over()?.whiteStones ?? 0} 子 +{" "}
@@ -1250,7 +1378,7 @@ export function GoGame(props: {
               }}
             >
               {mode() === "pve"
-                ? "你执黑。中国规则数子，白棋贴 7.5 子。"
+                ? "你执黑。中国规则数子，白棋贴 7.5 点（3¾子）。"
                 : "人机大战 / 本地双人不计积分，可保存棋谱反复回看。"}
             </Text>
             <View

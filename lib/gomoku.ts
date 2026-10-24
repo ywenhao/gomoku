@@ -10,7 +10,15 @@ export const WIN_LEN = 5;
 export type Player = 1 | 2;
 export type Difficulty = "easy" | "normal" | "hard" | "hell";
 export type Mode = "pve" | "pvp" | "aiai";
-export type GameKind = "gomoku" | "go";
+export type GameKind =
+  | "gomoku"
+  | "go"
+  | "connect6"
+  | "ludo"
+  | "checkers"
+  | "chess"
+  | "xiangqi"
+  | "junqi";
 
 export interface Move {
   x: number;
