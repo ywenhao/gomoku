@@ -21,11 +21,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# 关于 Node 版本：这个项目本身不跑 Node（package.json 只有命令别名，打包、
-# 类型检查、测试全在 nsh 这一个二进制里，它自带 rolldown + oxc + QuickJS），
-# 所以不需要 actions/setup-node。CI 里出现的 Node 是各个 action 自己的运行时 ——
-# 早先 actions/checkout@v4 之类声明的是 node20，GitHub 会强制在 node24 上跑并
-# 告警。现在统一到声明 node24 的版本（node24 就是当前的 LTS）：
+# 关于 Node 版本：项目没有 npm 依赖；scripts/package.mjs 只使用 Node 内置模块，
+# 负责去掉 nsh 输出里的应用名目录。类型检查、测试与编译仍在 nsh 里完成，所以
+# 不需要 actions/setup-node。CI 里出现的 Node 是 runner 自带运行时和各 action
+# 自己的运行时 —— 早先 actions/checkout@v4 之类声明的是 node20，GitHub 会强制在
+# node24 上跑并告警。现在统一到声明 node24 的版本（node24 就是当前的 LTS）：
 #   checkout v7 / cache v6 / upload-artifact v7 / download-artifact v8 /
 #   setup-java v6 / action-gh-release v3
 # 其中 upload-artifact 只有 v7 起、download-artifact 只有 v8 起才是 node24。
@@ -69,19 +69,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 产出 <out>/<name>/ 与同名 zip；zip 里会多套一层 <name>/。
-          nsh package --target windows -o dist/windows
-      - name: 发布包去掉多余的顶层目录
+          # 平铺输出：exe 与 nsh/ 直接位于 dist/windows/。
+          node scripts/package.mjs windows
+      - name: 生成下载包
         shell: pwsh
         run: |
-          # 压缩目录内容而不是目录本身，解压后直接看到 exe 和 nsh/。
+          # 压缩 dist/windows 的内容而不是 dist/windows 目录本身，解压后直接
+          # 看到 exe 和 nsh/。下载包放在平台目录外，使 dist/windows 保持干净。
           # Compress-Archive 不会给中文文件名写入 UTF-8 标记，跨平台解压会乱码；
           # .NET 的 CreateFromDirectory 会正确编码，并且 includeBaseDirectory=false
           # 刚好不会额外嵌套「弈境」目录。
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $source = (Resolve-Path "dist/windows/弈境").Path
-          $output = (Resolve-Path "dist/windows").Path
-          $destination = Join-Path $output "yijing-windows-x64.zip"
+          $source = (Resolve-Path "dist/windows").Path
+          $destination = (Join-Path (Resolve-Path "dist").Path "yijing-windows-x64.zip")
           if (Test-Path -LiteralPath $destination) {
             Remove-Item -LiteralPath $destination -Force
           }
@@ -94,7 +94,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: yijing-windows-x64
-          path: dist/windows/yijing-windows-x64.zip
+          path: dist/yijing-windows-x64.zip
           if-no-files-found: error
 
   linux:
@@ -110,15 +110,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 产出 <out>/<name>/（GTK runner + nsh/ + .desktop）和同名 .tar.gz。
+          # 平铺输出：App、nsh/ 与 .desktop 直接位于 dist/linux/。
           # 运行需要 GTK 4.14+，即 Ubuntu 24.04 及以上。
-          nsh package --target linux -o dist/linux
+          node scripts/package.mjs linux
           # 压缩目录内容而不是目录本身，解压后直接看到 App 和 nsh/。
-          tar -czf dist/linux/yijing-linux-x64.tar.gz -C dist/linux/弈境 .
+          # 下载包放在平台目录外，使 dist/linux 保持干净。
+          tar -czf dist/yijing-linux-x64.tar.gz -C dist/linux .
       - uses: actions/upload-artifact@v7
         with:
           name: yijing-linux-x64
-          path: dist/linux/yijing-linux-x64.tar.gz
+          path: dist/yijing-linux-x64.tar.gz
           if-no-files-found: error
 
   macos:
@@ -141,14 +142,16 @@ jobs:
             echo "nsh 没有 Intel macOS 版，请换 arm64 runner" >&2
             exit 1
           }
-          # 产出 ad hoc 签名的 .app；codesign 与 sips 由 Xcode 命令行工具提供。
-          nsh package --target macos -o dist/macos
+          # .app 本身是应用包，因此保留 dist/macos/弈境.app 这一层。
+          # codesign 与 sips 由 Xcode 命令行工具提供。
+          node scripts/package.mjs macos
           # 用 ditto 而不是 zip：它保留 bundle 里的软链和权限位。
-          ditto -c -k --keepParent "dist/macos/弈境.app" dist/macos/yijing-macos-arm64.zip
+          # 下载包放在平台目录外，使 dist/macos 保持为原始应用包。
+          ditto -c -k --keepParent "dist/macos/弈境.app" dist/yijing-macos-arm64.zip
       - uses: actions/upload-artifact@v7
         with:
           name: yijing-macos-arm64
-          path: dist/macos/yijing-macos-arm64.zip
+          path: dist/yijing-macos-arm64.zip
           if-no-files-found: error
 
   android:
@@ -185,14 +188,14 @@ jobs:
           if [ -n "${KEYSTORE_BASE64:-}" ]; then
             # 上架用：仓库配好这三个 secret 就走正式签名。
             printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            nsh package --target android -o dist/android \
+            node scripts/package.mjs android \
               --keystore "$RUNNER_TEMP/release.jks" \
               --key-alias "$KEY_ALIAS" \
               --keystore-password "$KEYSTORE_PASSWORD"
           else
             # 没配 keystore 时 nsh 用标准 debug key 签名：能装到任何设备上试玩，
             # 但上不了应用商店。
-            nsh package --target android -o dist/android
+            node scripts/package.mjs android
           fi
           mv dist/android/*.apk dist/android/yijing-android.apk
       - uses: actions/upload-artifact@v7
@@ -214,13 +217,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 静态站点：index.html 加内容哈希命名的 wasm/js/字节码，丢给任意
-          # 服务器或 CDN 即可。需要 http 协议，直接双击 index.html 打不开。
-          nsh package --target web -o dist/web
+          # 静态站点：index.html 加内容哈希命名的 wasm/js/字节码，直接位于
+          # dist/web/，也可以原样部署到 Cloudflare Pages。需要 http 协议，
+          # 直接双击 index.html 打不开。
+          node scripts/package.mjs web
           # 压缩目录内容而不是目录本身，解压后 index.html 直接位于当前目录。
-          (cd dist/web/弈境 && zip -qr ../yijing-web.zip ./*)
+          # 下载包放在平台目录外，使 dist/web 适合直接静态部署。
+          (cd dist/web && zip -qr ../yijing-web.zip ./*)
       - uses: actions/upload-artifact@v7
         with:
           name: yijing-web
-          path: dist/web/yijing-web.zip
+          path: dist/yijing-web.zip
           if-no-files-found: error

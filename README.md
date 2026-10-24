@@ -75,13 +75,32 @@ npm run check           # TypeScript检查
 npm test                # 全部规则与界面测试
 npm run verify          # 检查+测试
 npm run build:release   # 编译发布字节码
-npm run package:web     # Web静态包
-npm run package:linux   # Linux包，其他平台见package.json
+npm run package:web     # Web静态包，输出 dist/web/
+npm run package:linux   # Linux包，输出 dist/linux/
 ```
+
+打包脚本会去掉 nsh 自动增加的「弈境」层级：Windows、Linux、Web 产物分别直接位于 `dist/windows/`、`dist/linux/`、`dist/web/`；macOS 保留应用包 `dist/macos/弈境.app`，Android 和 iOS 输出 `.apk` / `.ipa` 文件。
 
 测试覆盖规则边界、国际象棋标准走法数与特殊着、全部象棋题面 / 解答、军棋战斗与布阵、飞行棋骰子与撞机、跳棋星盘与连跳、六子棋双子回合、棋钟加秒 / 读秒 / 超时、坏档、棋谱重放、学习和八棋种界面流程。手动测试时钟无需等待真实比赛时长。可用 `nsh test --target web --browser <chromium路径>` 验证真实浏览器绘制。
 
 主要新增文件：`lib/royal.ts`（两种象棋）、`lib/race.ts`（飞行棋与中国跳棋）、`lib/junqi.ts`、`lib/connect6.ts`、`lib/clock.ts`、`lib/multigame.ts`，以及对应纯规则测试；界面位于 `components/MultiGame.tsx`、`MultiBoard.tsx`、`Guide.tsx`、`Endgames.tsx`。
+
+## 部署 Web 到 Cloudflare Pages
+
+`npm run package:web` 生成的 `dist/web/` 就是完整静态站点。推荐直接上传构建产物，这样 Cloudflare 的构建环境不需要安装 `nsh`：
+
+1. 在 Cloudflare 控制台进入 **Workers & Pages → Create application → Pages → Upload assets**。
+2. 项目名可填 `yijing`，把 `dist/web/` 里的全部文件上传（也可以直接拖入整个目录）。
+3. 点击部署，完成后使用生成的 `*.pages.dev` 域名；需要自定义域名时再到项目的 **Custom domains** 里绑定。
+
+也可以在本地使用 Wrangler 部署：
+
+```sh
+npm run package:web
+npx wrangler@latest pages deploy dist/web --project-name yijing --branch main
+```
+
+首次部署时 Wrangler 会按提示创建项目或授权 Cloudflare 账号。不要把 `dist/` 其他平台的目录一起上传；Web 站点必须通过 HTTP(S) 访问，直接双击 `dist/web/index.html` 无法运行。
 
 ## 数据与许可
 
