@@ -69,9 +69,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 产出 <out>/<name>/ 与 <out>/<name>.zip，zip 里是 <name>.exe 加旁边的 nsh/。
+          # 产出 <out>/<name>/ 与同名 zip；zip 里会多套一层 <name>/。
           nsh package --target windows -o dist/windows
-          mv dist/windows/*.zip dist/windows/yijing-windows-x64.zip
+      - name: 发布包去掉多余的顶层目录
+        shell: pwsh
+        run: |
+          # 压缩目录内容而不是目录本身，解压后直接看到 exe 和 nsh/。
+          Compress-Archive `
+            -Path "dist/windows/弈境/*" `
+            -DestinationPath "dist/windows/yijing-windows-x64.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: yijing-windows-x64
@@ -94,7 +100,8 @@ jobs:
           # 产出 <out>/<name>/（GTK runner + nsh/ + .desktop）和同名 .tar.gz。
           # 运行需要 GTK 4.14+，即 Ubuntu 24.04 及以上。
           nsh package --target linux -o dist/linux
-          mv dist/linux/*.tar.gz dist/linux/yijing-linux-x64.tar.gz
+          # 压缩目录内容而不是目录本身，解压后直接看到 App 和 nsh/。
+          tar -czf dist/linux/yijing-linux-x64.tar.gz -C dist/linux/弈境 .
       - uses: actions/upload-artifact@v7
         with:
           name: yijing-linux-x64
@@ -197,10 +204,8 @@ jobs:
           # 静态站点：index.html 加内容哈希命名的 wasm/js/字节码，丢给任意
           # 服务器或 CDN 即可。需要 http 协议，直接双击 index.html 打不开。
           nsh package --target web -o dist/web
-          cd dist/web
-          # 用 ./* 而不是 .：zip 还没建出来，通配符展开时不会把压缩包自己圈进去，
-          # 解压后也是一个完整的「弈境/」目录。
-          zip -qr yijing-web.zip ./*
+          # 压缩目录内容而不是目录本身，解压后 index.html 直接位于当前目录。
+          (cd dist/web/弈境 && zip -qr ../yijing-web.zip ./*)
       - uses: actions/upload-artifact@v7
         with:
           name: yijing-web
