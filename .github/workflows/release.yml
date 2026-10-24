@@ -85,3 +85,19 @@ jobs:
           generate_release_notes: true
           # 只有 v* 会走到这里，都是正式版，不标成 pre-release。
           prerelease: false
+
+      - name: 触发 Cloudflare Pages 部署
+        env:
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_HOOK}" ]; then
+            echo "::warning title=Cloudflare Pages::未配置 CLOUDFLARE_PAGES_DEPLOY_HOOK，跳过 Web 部署"
+            exit 0
+          fi
+          # Release 资产已经上传完成；钩子会让 Pages 下载当前版本并发布。
+          curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            -X POST "${DEPLOY_HOOK}" > /dev/null
+          echo "✓ 已触发 Cloudflare Pages 部署"

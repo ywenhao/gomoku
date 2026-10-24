@@ -88,20 +88,30 @@ npm run package:linux   # Linux包，输出 dist/linux/
 
 ## 部署 Web 到 Cloudflare Pages
 
-`npm run package:web` 生成的 `dist/web/` 就是完整静态站点。推荐直接上传构建产物，这样 Cloudflare 的构建环境不需要安装 `nsh`：
+`npm run package:web` 生成的 `dist/web/` 就是完整静态站点。当前连接 GitHub 的 `yijing-game` Pages 项目复用 GitHub Actions 已经构建好的 Web 产物，不在 Cloudflare 构建镜像里安装 `nsh`：该镜像没有 `nsh`，而且 `nsh` 的 Linux runtime 要求 GTK 4.14+。
 
-1. 在 Cloudflare 控制台进入 **Workers & Pages → Create application → Pages → Upload assets**。
-2. 项目名可填 `yijing`，把 `dist/web/` 里的全部文件上传（也可以直接拖入整个目录）。
-3. 点击部署，完成后使用生成的 `*.pages.dev` 域名；需要自定义域名时再到项目的 **Custom domains** 里绑定。
+Cloudflare Pages 项目配置：
 
-也可以在本地使用 Wrangler 部署：
+- **Build command**：`npm run package:web:cloudflare`
+- **Build output directory**：`dist/web`
+- **Root directory**：留空
+
+`package:web:cloudflare` 会按 `package.json` 的版本下载 `https://github.com/ywenhao/gomoku/releases/download/v<版本>/yijing-web.zip`。版本提交先推送 `main` 时，脚本最多等待 10 分钟，直到对应 Release 资产上传完成。
+
+GitHub 的 `release.yml` 在 Release 发布完成后还会调用 Cloudflare Pages Deploy Hook，确保正式站最终部署最新版本：
+
+1. 在 Cloudflare Pages 项目的 **Settings → Builds & deployments → Deploy hooks** 创建 `main` 分支钩子。
+2. 在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 添加 `CLOUDFLARE_PAGES_DEPLOY_HOOK`，值为钩子 URL。
+3. 之后每次 `npm run release` 都会自动触发 Pages 部署。
+
+也可以本地直接上传构建产物：
 
 ```sh
 npm run package:web
 npx wrangler@latest pages deploy dist/web --project-name yijing --branch main
 ```
 
-首次部署时 Wrangler 会按提示创建项目或授权 Cloudflare 账号。不要把 `dist/` 其他平台的目录一起上传；Web 站点必须通过 HTTP(S) 访问，直接双击 `dist/web/index.html` 无法运行。
+不要把 `dist/` 其他平台的目录一起上传；Web 站点必须通过 HTTP(S) 访问，直接双击 `dist/web/index.html` 无法运行。
 
 ## 数据与许可
 

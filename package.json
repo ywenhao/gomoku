@@ -21,6 +21,7 @@
     "package:macos": "node scripts/package.mjs macos",
     "package:android": "node scripts/package.mjs android",
     "package:web": "node scripts/package.mjs web",
+    "package:web:cloudflare": "node scripts/cloudflare-web.mjs",
     "package:ios": "node scripts/package.mjs ios",
     "clean": "node scripts/clean.mjs",
     "clean:all": "node scripts/clean.mjs --all",
