@@ -69,15 +69,15 @@ jobs:
 
             | 平台 | 文件 | 说明 |
             | --- | --- | --- |
-            | Windows | `gomoku-windows-x64.zip` | 解压后双击 `五子棋.exe`，`nsh/` 目录要跟它放在一起 |
-            | Linux | `gomoku-linux-x64.tar.gz` | 解压后运行 `五子棋/App`，需要 GTK 4.14+（Ubuntu 24.04 及以上） |
-            | macOS | `gomoku-macos-arm64.zip` | 解压得到 `五子棋.app`，仅 Apple Silicon |
-            | Android | `gomoku-android.apk` | debug 签名，允许「未知来源」后可直接安装 |
-            | Web | `gomoku-web.zip` | 解压后起任意静态服务器（需要 http，双击 index.html 打不开） |
+            | Windows | `yijing-windows-x64.zip` | 解压后双击 `弈境.exe`，`nsh/` 目录要跟它放在一起 |
+            | Linux | `yijing-linux-x64.tar.gz` | 解压后运行 `弈境/App`，需要 GTK 4.14+（Ubuntu 24.04 及以上） |
+            | macOS | `yijing-macos-arm64.zip` | 解压得到 `弈境.app`，仅 Apple Silicon |
+            | Android | `yijing-android.apk` | debug 签名，允许「未知来源」后可直接安装 |
+            | Web | `yijing-web.zip` | 解压后起任意静态服务器（需要 http，双击 index.html 打不开） |
 
             macOS 的包是 ad hoc 签名、没有公证，第一次打开会被 Gatekeeper 拦下：
-            右键点 `五子棋.app` → 打开，或者先执行
-            `xattr -dr com.apple.quarantine 五子棋.app`。
+            右键点 `弈境.app` → 打开，或者先执行
+            `xattr -dr com.apple.quarantine 弈境.app`。
 
             Android 包用的是标准 debug key，能装到设备上试玩，但上不了应用商店。
           generate_release_notes: true

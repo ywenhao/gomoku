@@ -2,11 +2,17 @@ import { Scroll, Text, View, effect, signal } from "nsh";
 import { windowSize } from "nsh/device";
 import { C, ConfirmButton, PressButton, Segmented } from "./ui";
 import { formatDuration, formatStamp, type GameRecord } from "../lib/score";
-import type { Difficulty, Mode } from "../lib/gomoku";
+import type {
+  Difficulty,
+  GameKind,
+  Mode,
+} from "../lib/gomoku";
+import type { GoSize } from "../lib/go";
 
 const MODES: readonly { key: Mode; label: string }[] = [
   { key: "pve", label: "人机" },
   { key: "pvp", label: "双人" },
+  { key: "aiai", label: "人机大战" },
 ];
 
 const LEVELS: readonly { key: Difficulty; label: string }[] = [
@@ -19,6 +25,12 @@ const LEVELS: readonly { key: Difficulty; label: string }[] = [
 const LIMITS: readonly { key: string; label: string }[] = [
   { key: "on", label: "开" },
   { key: "off", label: "关" },
+];
+
+const SIZES: readonly { key: string; label: string }[] = [
+  { key: "9", label: "9 路" },
+  { key: "13", label: "13 路" },
+  { key: "19", label: "19 路" },
 ];
 
 const LEVEL_NAME: Record<Difficulty, string> = {
@@ -77,7 +89,9 @@ const OUTCOME_COLOR: Record<string, string> = {
   draw: "#8d8173",
 };
 
+/** 对局菜单：设置、人机大战控制、保存棋谱、历史战绩。 */
 export function MenuPanel(props: {
+  kind: GameKind;
   score: number;
   best: number;
   streak: number;
@@ -89,15 +103,27 @@ export function MenuPanel(props: {
   level: Difficulty;
   limitOn: boolean;
   soundOn: boolean;
+  goSize?: GoSize;
+  moveCount: number;
+  paused?: boolean;
+  /** 回看位置；null 表示停在当前局面。用于禁用越界的步进按钮。 */
+  reviewAt?: number | null;
+  canSaveRecord?: boolean;
   onMode: (m: Mode) => void;
   onLevel: (l: Difficulty) => void;
   onLimit: (on: boolean) => void;
   onSound: () => void;
+  onGoSize?: (size: GoSize) => void;
   onHome: () => void;
   onHelp: () => void;
   onExit: () => void;
   onClear: () => void;
   onClose: () => void;
+  onSaveRecord?: () => void;
+  onTogglePause?: () => void;
+  onStepBack?: () => void;
+  onStepForward?: () => void;
+  onReplay?: () => void;
 }) {
   const confirming = signal(false);
 
@@ -108,8 +134,10 @@ export function MenuPanel(props: {
     return () => clearTimeout(t);
   });
 
-  const maxHeight = Math.max(280, Math.min(600, windowSize().height - 72));
+  const maxHeight = Math.max(280, Math.min(640, windowSize().height - 72));
   const total = props.win + props.loss + props.draw;
+  const go = props.kind === "go";
+  const aiai = props.mode === "aiai";
 
   return (
     <View
@@ -140,7 +168,7 @@ export function MenuPanel(props: {
         testID="menu-panel"
         style={{
           width: "100%",
-          maxWidth: 400,
+          maxWidth: 410,
           maxHeight,
           backgroundColor: C.panel,
           borderRadius: 22,
@@ -170,7 +198,7 @@ export function MenuPanel(props: {
                 marginTop: 2,
               }}
             >
-              GOMOKU · 15 × 15
+              {go ? `GO · ${props.goSize ?? 19} 路` : "GOMOKU · 15 × 15"}
             </Text>
           </View>
           <View
@@ -219,6 +247,58 @@ export function MenuPanel(props: {
           共 {total} 局 · {props.win} 胜 {props.loss} 负 {props.draw} 和
         </Text>
 
+        <If when={aiai}>
+          <SectionTitle text="人机大战" />
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <PressButton
+              label={props.paused ? "继续" : "暂停"}
+              testID="menu-pause"
+              onPress={() => props.onTogglePause?.()}
+              tone="primary"
+              grow
+            />
+            <PressButton
+              label="上一步"
+              testID="menu-step-back"
+              onPress={() => props.onStepBack?.()}
+              disabled={
+                props.moveCount === 0 ||
+                (props.reviewAt !== null &&
+                  props.reviewAt !== undefined &&
+                  props.reviewAt <= 0)
+              }
+              grow
+            />
+            <PressButton
+              label="下一步"
+              testID="menu-step-forward"
+              onPress={() => props.onStepForward?.()}
+              disabled={
+                props.reviewAt === null ||
+                props.reviewAt === undefined ||
+                props.reviewAt >= props.moveCount
+              }
+              grow
+            />
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+            <PressButton
+              label="整局回放"
+              testID="menu-replay"
+              onPress={() => props.onReplay?.()}
+              disabled={props.moveCount < 2}
+              grow
+            />
+            <PressButton
+              label="保存棋谱"
+              testID="menu-save-record"
+              onPress={() => props.onSaveRecord?.()}
+              disabled={!props.canSaveRecord}
+              grow
+            />
+          </View>
+        </If>
+
         <SectionTitle text="设置" />
         <View style={{ gap: 11 }}>
           <View
@@ -226,6 +306,7 @@ export function MenuPanel(props: {
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "space-between",
+              gap: 10,
             }}
           >
             <Text style={{ fontSize: 13.5, color: C.ink }}>对战模式</Text>
@@ -236,26 +317,51 @@ export function MenuPanel(props: {
               compact
             />
           </View>
+          <If when={props.mode !== "pvp"}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <Text style={{ fontSize: 13.5, color: C.ink }}>
+                {aiai ? "AI 难度（双方）" : "AI 难度"}
+              </Text>
+              <Segmented
+                value={() => props.level}
+                options={LEVELS}
+                onChange={props.onLevel}
+                compact
+              />
+            </View>
+          </If>
+          <If when={go && !!props.onGoSize}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <Text style={{ fontSize: 13.5, color: C.ink }}>棋盘路数</Text>
+              <Segmented
+                value={() => String(props.goSize ?? 19)}
+                options={SIZES}
+                onChange={(k) => props.onGoSize?.(Number(k) as GoSize)}
+                compact
+                idPrefix="menu-go"
+              />
+            </View>
+          </If>
           <View
             style={{
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "space-between",
-            }}
-          >
-            <Text style={{ fontSize: 13.5, color: C.ink }}>AI 难度</Text>
-            <Segmented
-              value={() => props.level}
-              options={LEVELS}
-              onChange={props.onLevel}
-              compact
-            />
-          </View>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
+              gap: 10,
             }}
           >
             <Text style={{ fontSize: 13.5, color: C.ink }}>
@@ -287,9 +393,18 @@ export function MenuPanel(props: {
 
         <SectionTitle text="游戏" />
         <View style={{ gap: 9 }}>
+          <If when={!aiai}>
+            <PressButton
+              label="保存棋谱"
+              hint="把当前对局保存到棋谱库，可随时回放"
+              testID="menu-save-record"
+              onPress={() => props.onSaveRecord?.()}
+              disabled={!props.canSaveRecord}
+            />
+          </If>
           <PressButton
             label="玩法与帮助"
-            hint="查看规则、棋型、开局布局与攻防顺序"
+            hint={go ? "查看围棋规则、气、提子与数子" : "查看规则、棋型、开局布局与攻防顺序"}
             testID="menu-help"
             onPress={props.onHelp}
           />
@@ -359,19 +474,27 @@ export function MenuPanel(props: {
                         color: OUTCOME_COLOR[item().outcome],
                       }}
                     >
-                      {OUTCOME_TEXT[item().outcome]}
+                      {item().game === "go" && item().result
+                        ? item().result!.slice(0, 1)
+                        : OUTCOME_TEXT[item().outcome]}
                     </Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 12, color: C.ink }}>
+                      {item().game === "go" ? "围棋" : "五子棋"} ·{" "}
                       {LEVEL_NAME[item().level]} · {item().moves} 手 ·{" "}
                       {formatDuration(item().seconds)}
-                      {item().mode === "pvp" ? " · 双人" : ""}
+                      {item().mode === "pvp"
+                        ? " · 双人"
+                        : item().mode === "aiai"
+                          ? " · 人机大战"
+                          : ""}
                     </Text>
                     <Text
                       style={{ fontSize: 10, color: C.muted, marginTop: 1 }}
                     >
                       {formatStamp(item().at)}
+                      {item().result ? ` · ${item().result}` : ""}
                       {item().stars > 0 ? ` · ${"★".repeat(item().stars)}` : ""}
                     </Text>
                   </View>
@@ -424,8 +547,10 @@ export function MenuPanel(props: {
             lineHeight: 17,
           }}
         >
-          计分：胜利基础分随难度（100 / 180 / 300 / 500），另加速度、效率与连胜奖励；
-          悔棋 −15、超时 −10。清空记录会同时重置总分、最高分与连胜。
+          {go
+            ? "围棋采用中国规则数子：棋子 + 围空，白棋贴 7.5 子。连续两次虚手进入数子，可标记死子后确认结果。"
+            : "计分：胜利基础分随难度（100 / 180 / 300 / 500），另加速度、效率与连胜奖励；悔棋 −15、超时 −10。"}
+          清空记录会同时重置总分、最高分与连胜。
         </Text>
       </Scroll>
     </View>

@@ -1,5 +1,6 @@
 import {
   Canvas,
+  Text,
   View,
   computed,
   type Accessor,
@@ -8,8 +9,14 @@ import {
 } from "nsh";
 import { SIZE, type Player } from "../lib/gomoku";
 
-const CELLS: number[] = [];
-for (let i = 0; i < SIZE * SIZE; i++) CELLS.push(i);
+const C_INK = "#2b241c";
+const C_ACCENT = "#c0442c";
+
+export interface BoardMark {
+  i: number;
+  label?: string;
+  tone?: "accent" | "ink" | "white";
+}
 
 const STARS: readonly [number, number][] = [
   [3, 3],
@@ -20,10 +27,11 @@ const STARS: readonly [number, number][] = [
 ];
 
 /** 棋盘表面：木纹、网格、星位（只画一次，尺寸变化时重画） */
-function drawSurface(cx: CanvasRenderingContext2D, size: CanvasSize) {
+function surface(n: number, stars: readonly [number, number][]) {
+  return (cx: CanvasRenderingContext2D, size: CanvasSize) => {
   const s = Math.min(size.width, size.height);
   if (s <= 0) return;
-  const cell = s / SIZE;
+  const cell = s / n;
   const pad = cell / 2;
 
   const wood = cx.createLinearGradient(0, 0, s, s);
@@ -55,7 +63,7 @@ function drawSurface(cx: CanvasRenderingContext2D, size: CanvasSize) {
   cx.strokeStyle = "rgba(92,62,28,0.60)";
   cx.lineWidth = Math.max(0.75, s / 900);
   cx.beginPath();
-  for (let i = 0; i < SIZE; i++) {
+  for (let i = 0; i < n; i++) {
     const p = pad + i * cell;
     cx.moveTo(pad, p);
     cx.lineTo(s - pad, p);
@@ -72,20 +80,24 @@ function drawSurface(cx: CanvasRenderingContext2D, size: CanvasSize) {
   // 星位
   cx.fillStyle = "rgba(70,44,18,0.88)";
   const r = Math.max(1.8, cell * 0.072);
-  for (const [sx, sy] of STARS) {
+  for (const [sx, sy] of stars) {
     cx.beginPath();
     cx.arc(pad + sx * cell, pad + sy * cell, r, 0, Math.PI * 2);
     cx.fill();
   }
+  };
 }
 
 interface CellProps {
   i: number;
+  n: number;
   cell: Accessor<number>;
   stone: Accessor<number>;
   board: Accessor<number[]>;
   last: Accessor<number>;
   winLine: Accessor<number[]>;
+  dead: Accessor<number[]>;
+  marks: Accessor<BoardMark[]>;
   hover: Accessor<number>;
   canPlay: Accessor<boolean>;
   turn: Accessor<Player>;
@@ -95,12 +107,14 @@ interface CellProps {
 }
 
 function Cell(props: CellProps) {
-  const x = props.i % SIZE;
-  const y = (props.i - x) / SIZE;
+  const x = props.i % props.n;
+  const y = (props.i - x) / props.n;
 
   const v = computed(() => props.board()[props.i]);
   const isLast = computed(() => props.last() === props.i);
   const isWin = computed(() => props.winLine().indexOf(props.i) !== -1);
+  const isDead = computed(() => props.dead().indexOf(props.i) !== -1);
+  const mark = computed(() => props.marks().find((m) => m.i === props.i));
   const ghost = computed(
     () => v() === 0 && props.hover() === props.i && props.canPlay(),
   );
@@ -183,6 +197,36 @@ function Cell(props: CellProps) {
               }}
             />
           </If>
+          <If when={isDead()}>
+            <View
+              style={{
+                position: "absolute",
+                width: stone() * 0.72,
+                height: stone() * 0.72,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <View
+                style={{
+                  position: "absolute",
+                  width: stone() * 0.7,
+                  height: 2,
+                  backgroundColor: "#c0442c",
+                  transform: [{ rotate: "45deg" }],
+                }}
+              />
+              <View
+                style={{
+                  position: "absolute",
+                  width: stone() * 0.7,
+                  height: 2,
+                  backgroundColor: "#c0442c",
+                  transform: [{ rotate: "-45deg" }],
+                }}
+              />
+            </View>
+          </If>
         </View>
       </If>
 
@@ -199,15 +243,58 @@ function Cell(props: CellProps) {
           }}
         />
       </If>
+
+      <If when={mark() !== undefined}>
+        <View
+          style={{
+            position: "absolute",
+            width: Math.max(9, stone() * 0.48),
+            height: Math.max(9, stone() * 0.48),
+            borderRadius: Math.max(9, stone() * 0.48) / 2,
+            borderWidth: 2,
+            borderColor:
+              mark()?.tone === "white"
+                ? "#fdfbf6"
+                : mark()?.tone === "ink"
+                  ? "#2b241c"
+                  : "#c0442c",
+            backgroundColor:
+              mark()?.label !== undefined ? "rgba(255,253,249,0.92)" : "transparent",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <If when={mark()?.label !== undefined}>
+            <Text
+              style={{
+                fontSize: Math.max(8, stone() * 0.3),
+                fontWeight: "700",
+                color:
+                  mark()?.tone === "white"
+                    ? C_INK
+                    : mark()?.tone === "ink"
+                      ? C_INK
+                      : C_ACCENT,
+              }}
+            >
+              {mark()?.label ?? ""}
+            </Text>
+          </If>
+        </View>
+      </If>
     </View>
   );
 }
 
 export function Board(props: {
   size: Accessor<number>;
+  n?: number;
+  stars?: readonly [number, number][];
   board: Accessor<number[]>;
   last: Accessor<number>;
   winLine: Accessor<number[]>;
+  dead?: Accessor<number[]>;
+  marks?: Accessor<BoardMark[]>;
   hover: Accessor<number>;
   canPlay: Accessor<boolean>;
   turn: Accessor<Player>;
@@ -215,7 +302,13 @@ export function Board(props: {
   setHover: (i: number) => void;
   clearHover: (i: number) => void;
 }) {
-  const cell = computed(() => props.size() / SIZE);
+  const n = props.n ?? SIZE;
+  const stars = props.stars ?? STARS;
+  const cells: number[] = [];
+  for (let i = 0; i < n * n; i++) cells.push(i);
+  const noDead = computed<number[]>(() => []);
+  const noMarks = computed<BoardMark[]>(() => []);
+  const cell = computed(() => props.size() / n);
   const stone = computed(() => cell() * 0.84);
 
   return (
@@ -231,7 +324,7 @@ export function Board(props: {
       }}
     >
       <Canvas
-        draw={drawSurface}
+        draw={surface(n, stars)}
         pointerEvents="none"
         style={{
           position: "absolute",
@@ -241,15 +334,18 @@ export function Board(props: {
           height: props.size(),
         }}
       />
-      <Each of={CELLS} key="index">
+      <Each of={cells} key="index">
         {(i) => (
           <Cell
             i={i()}
+            n={n}
             cell={cell}
             stone={stone}
             board={props.board}
             last={props.last}
             winLine={props.winLine}
+            dead={props.dead ?? noDead}
+            marks={props.marks ?? noMarks}
             hover={props.hover}
             canPlay={props.canPlay}
             turn={props.turn}

@@ -51,7 +51,7 @@ if (pkg.version !== app.version) {
 }
 
 const tag = `v${app.version}`;
-const message = `五子棋 ${app.version}`;
+const message = `弈境 ${app.version}`;
 
 const dirty = git("status", "--porcelain");
 if (dirty) {

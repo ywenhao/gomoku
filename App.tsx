@@ -13,11 +13,15 @@ import { SafeAreaView } from "nsh/base";
 import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";
 import { Board } from "./components/Board";
+import { GoGame, type GoFinish } from "./components/GoGame";
 import { HelpPanel } from "./components/Help";
 import { Home } from "./components/Home";
+import { Learn } from "./components/Learn";
 import { MenuPanel } from "./components/Menu";
+import { Records } from "./components/Records";
 import { ResultPanel } from "./components/Result";
 import { SoundBank } from "./components/Sound";
+import { Tsumego } from "./components/Tsumego";
 import { C, PressButton, StoneDot } from "./components/ui";
 import { fallbackMove, findBestMove, type AiChoice } from "./lib/ai";
 import {
@@ -28,11 +32,13 @@ import {
   idx,
   other,
   type Difficulty,
+  type GameKind,
   type GameResult,
   type Mode,
   type Move,
   type Player,
 } from "./lib/gomoku";
+import type { GoSize } from "./lib/go";
 import { readSavedGame, savedTurn, type SavedGame } from "./lib/save";
 import {
   HISTORY_LIMIT,
@@ -46,22 +52,38 @@ import {
   type GameRecord,
   type Outcome,
 } from "./lib/score";
+import {
+  RECORDS_LIMIT,
+  makeRecord,
+  readRecords,
+  type RecordInput,
+  type StoredRecord,
+} from "./lib/records";
+import { addStudyId, readStudy, type StudyProgress } from "./lib/study";
+import { LEARN_TRACKS } from "./lib/learn";
+import { TSUMEGO_PROBLEMS } from "./lib/tsumego";
 import { loadSounds, type SoundName } from "./lib/sound";
 
 const HUMAN: Player = 1;
 const AI: Player = 2;
 const SAVE_KEY = "gomoku.v2";
 const GAME_KEY = "gomoku.game.v1";
+const RECORDS_KEY = "gomoku.records.v1";
+const STUDY_KEY = "gomoku.study.v1";
 const NO_LINE: number[] = [];
 /** 继续游戏时至少留 3 秒，避免一进来就超时 */
 const RESUME_FLOOR_MS = 3000;
 /** 对局进行中定期刷新剩余时间，降低被直接杀掉时的损失 */
 const GAME_SAVE_MS = 5000;
+/** 人机大战每手间隔，约 2 秒 */
+const AIAI_DELAY_MS = 2000;
+/** 回放每手间隔 */
+const REPLAY_MS = 620;
 
-type Screen = "home" | "game";
+type Screen = "home" | "game" | "go" | "tsumego" | "learn" | "records";
 
-/** 本地对局（人机 / 双人）：菜单打开时暂停倒计时。将来加联网模式时不要放进来。 */
-const LOCAL_MODES: readonly Mode[] = ["pve", "pvp"];
+/** 本地对局（人机 / 双人 / 人机大战）：菜单打开时暂停倒计时。 */
+const LOCAL_MODES: readonly Mode[] = ["pve", "pvp", "aiai"];
 
 /** 最后几秒进入红色闪烁警告，并逐秒滴答。 */
 const URGENT_SECONDS = 5;
@@ -110,6 +132,10 @@ interface Settle {
 const num = (v: unknown, fallback = 0) =>
   typeof v === "number" && isFinite(v) ? v : fallback;
 
+const MODES: readonly Mode[] = ["pve", "pvp", "aiai"];
+const LEVELS: readonly Difficulty[] = ["easy", "normal", "hard", "hell"];
+const GO_SIZES: readonly GoSize[] = [9, 13, 19];
+
 function readProgress(raw: string | null): Progress | null {
   if (!raw) return null;
   let data: Record<string, unknown>;
@@ -128,7 +154,19 @@ function readProgress(raw: string | null): Progress | null {
     loss: num(data.loss),
     draw: num(data.draw),
     history: list
-      .filter((r) => r && typeof r.at === "number" && typeof r.outcome === "string")
+      .filter(
+        (r) =>
+          r &&
+          typeof r.at === "number" &&
+          typeof r.outcome === "string" &&
+          typeof r.moves === "number",
+      )
+      .map((r) => ({
+        ...r,
+        game: (r.game === "go" ? "go" : "gomoku") as GameKind,
+        mode: MODES.includes(r.mode) ? r.mode : "pve",
+        level: LEVELS.includes(r.level) ? r.level : "normal",
+      }))
       .slice(0, HISTORY_LIMIT),
   };
 }
@@ -143,11 +181,22 @@ function App() {
   const level = signal<Difficulty>("normal");
   const thinking = signal(false);
   const hover = signal(-1);
-  /** 每次重置/悔棋自增，用来作废正在进行的 AI 计算 */
+  /** 每次重置/悔棋/回看自增，用来作废正在进行的 AI 计算 */
   const round = signal(0);
   const boardSize = signal(0);
 
+  /** 人机大战：暂停、逐步回看与整局回放 */
+  const paused = signal(false);
+  const reviewAt = signal<number | null>(null);
+  const replaying = signal(false);
+
+  const kind = signal<GameKind>("gomoku");
+  const goSize = signal<GoSize>(9);
+  const goInitial = signal<SavedGame | null>(null);
+
   const progress = signal<Progress>(EMPTY);
+  const records = signal<StoredRecord[]>([]);
+  const study = signal<StudyProgress>({ tsumego: [], lessons: [] });
   const limitOn = signal(true);
   const leftMs = signal(MOVE_SECONDS * 1000);
   const undos = signal(0);
@@ -181,8 +230,18 @@ function App() {
   };
 
   /* ---------------------------- 派生 ---------------------------- */
+  const viewMoves = computed(() => {
+    const at = reviewAt();
+    if (at === null) return moves();
+    return moves().slice(0, Math.max(0, Math.min(at, moves().length)));
+  });
+
+  const viewBoard = computed(() =>
+    reviewAt() === null ? board() : boardFromMoves(viewMoves()),
+  );
+
   const lastIndex = computed(() => {
-    const m = moves();
+    const m = viewMoves();
     if (m.length === 0) return -1;
     const last = m[m.length - 1];
     return idx(last.x, last.y);
@@ -190,7 +249,7 @@ function App() {
 
   const winLine = computed(() => {
     const o = over();
-    return o && o.kind === "win" ? o.line : NO_LINE;
+    return o && o.kind === "win" && reviewAt() === null ? o.line : NO_LINE;
   });
 
   const canPlay = computed(
@@ -198,18 +257,26 @@ function App() {
       screen() === "game" &&
       over() === null &&
       !thinking() &&
+      !paused() &&
       !menu() &&
       !helpOpen() &&
       !resultOpen() &&
+      reviewAt() === null &&
+      !replaying() &&
+      mode() !== "aiai" &&
       (mode() === "pvp" || turn() === HUMAN),
   );
 
-  /** 是否该给人倒计时（AI 回合、终局、关闭限时都不计时） */
+  /** 是否该给人倒计时（AI 回合、人机大战、终局、回看、关闭限时都不计时） */
   const timed = computed(
     () =>
       screen() === "game" &&
       limitOn() &&
       over() === null &&
+      !paused() &&
+      !replaying() &&
+      reviewAt() === null &&
+      mode() !== "aiai" &&
       (mode() === "pvp" || turn() === HUMAN),
   );
 
@@ -226,9 +293,19 @@ function App() {
 
   const statusText = computed(() => {
     const o = over();
+    if (reviewAt() !== null) {
+      return replaying()
+        ? `整局回放 · 第 ${reviewAt() ?? 0} 手`
+        : `回看第 ${reviewAt() ?? 0} 手`;
+    }
     if (o) {
       if (o.kind === "draw") return "和棋";
       return o.winner === 1 ? "黑棋获胜" : "白棋获胜";
+    }
+    if (mode() === "aiai") {
+      if (paused()) return "人机大战已暂停";
+      if (thinking()) return "AI 思考中…";
+      return turn() === 1 ? "黑方 AI 落子" : "白方 AI 落子";
     }
     if (mode() === "pve") {
       if (turn() === AI) return thinking() ? "AI 思考中…" : "AI 落子";
@@ -236,6 +313,18 @@ function App() {
     }
     return turn() === 1 ? "黑棋落子" : "白棋落子";
   });
+
+  const levelBreakdown = computed(() => {
+    const out: Record<string, number> = {};
+    for (const p of TSUMEGO_PROBLEMS) {
+      out[p.level] = (out[p.level] ?? 0) + 1;
+    }
+    return out;
+  });
+  const learnTotal = LEARN_TRACKS.reduce(
+    (n, t) => n + t.lessons.length,
+    0,
+  );
 
   /* ---------------------------- 动作 ---------------------------- */
   function flash(text: string) {
@@ -281,11 +370,20 @@ function App() {
     // 总分为负会让"分数"变得没意义，扣到底就停在 0
     const total = pve ? Math.max(0, prev.score + delta) : prev.score;
     const best = pve ? Math.max(prev.best, delta) : prev.best;
+    const title = pve
+      ? outcomeLabel(outcome)
+      : r.kind === "draw"
+        ? "和棋"
+        : r.winner === 1
+          ? "黑棋获胜"
+          : "白棋获胜";
     const record: GameRecord = {
       at: Date.now(),
       outcome,
       level: level(),
       mode: mode(),
+      game: "gomoku",
+      result: title,
       moves: count,
       seconds,
       delta,
@@ -303,14 +401,6 @@ function App() {
       history,
     };
 
-    const title = pve
-      ? outcomeLabel(outcome)
-      : r.kind === "draw"
-        ? "和棋"
-        : r.winner === 1
-          ? "黑棋获胜"
-          : "白棋获胜";
-
     batch(() => {
       progress.set(next);
       settle.set({
@@ -326,11 +416,12 @@ function App() {
       });
       menu.set(false);
       resultOpen.set(true);
+      paused.set(true);
     });
 
     // 双人局没有「我方」：任意一方连成五子都是赢棋；只有人机输给 AI 才放落败音
     playSound(
-      r.kind === "draw" ? "draw" : outcome === "loss" && pve ? "loss" : "win",
+      r.kind === "draw" ? "draw" : outcome === "loss" && mode() === "pve" ? "loss" : "win",
     );
   }
 
@@ -374,6 +465,9 @@ function App() {
       over.set(null);
       thinking.set(false);
       hover.set(-1);
+      paused.set(false);
+      reviewAt.set(null);
+      replaying.set(false);
       undos.set(0);
       timeouts.set(0);
       startedAt.set(0);
@@ -385,7 +479,7 @@ function App() {
   }
 
   function undo() {
-    if (over() !== null) return;
+    if (over() !== null || mode() === "aiai" || reviewAt() !== null) return;
     const m = moves();
     if (m.length === 0) return;
     const drop =
@@ -398,6 +492,7 @@ function App() {
       over.set(null);
       thinking.set(false);
       hover.set(-1);
+      paused.set(false);
       turn.set(kept.length % 2 === 0 ? 1 : 2);
       undos.update((n) => n + 1);
       leftMs.set(MOVE_SECONDS * 1000);
@@ -462,11 +557,59 @@ function App() {
     });
   }
 
+  function togglePause() {
+    if (paused()) {
+      batch(() => {
+        paused.set(false);
+        reviewAt.set(null);
+        replaying.set(false);
+      });
+      return;
+    }
+    batch(() => {
+      paused.set(true);
+      thinking.set(false);
+    });
+  }
+
+  function stepBack() {
+    const list = moves();
+    if (list.length === 0) return;
+    replaying.set(false);
+    paused.set(true);
+    const at = reviewAt() === null ? list.length : reviewAt()!;
+    reviewAt.set(Math.max(0, at - 1));
+  }
+
+  function stepForward() {
+    const list = moves();
+    const at = reviewAt();
+    if (at === null) return;
+    replaying.set(false);
+    paused.set(true);
+    reviewAt.set(Math.min(list.length, at + 1));
+  }
+
+  function startReplay() {
+    if (moves().length < 2) {
+      flash("至少两手才能回放");
+      return;
+    }
+    batch(() => {
+      paused.set(true);
+      reviewAt.set(0);
+      replaying.set(true);
+      menu.set(false);
+      resultOpen.set(false);
+    });
+  }
+
   /** 当前对局快照；没开始或已结束返回 null（这时不该留「继续游戏」）。 */
   function gameSnapshot(): SavedGame | null {
     const m = moves();
     if (m.length === 0 || over() !== null) return null;
     return {
+      kind: "gomoku",
       moves: m,
       mode: mode(),
       level: level(),
@@ -487,6 +630,8 @@ function App() {
       mode: mode(),
       limitOn: limitOn(),
       soundOn: soundOn(),
+      kind: kind(),
+      goSize: goSize(),
     });
   }
 
@@ -498,10 +643,34 @@ function App() {
       : Storage.removeItem(GAME_KEY);
   }
 
+  function writeGoGame(): Promise<void> {
+    const game = savedGame();
+    return game
+      ? Storage.setItem(GAME_KEY, JSON.stringify(game))
+      : Storage.removeItem(GAME_KEY);
+  }
+
   /** 继续存档：棋盘、设置、悔棋/超时和剩余时间一起恢复。 */
   function continueGame() {
     const game = savedGame();
     if (!game) return;
+
+    if (game.kind === "go") {
+      batch(() => {
+        kind.set("go");
+        goSize.set(game.goSize ?? 9);
+        goInitial.set(game);
+        mode.set(game.mode);
+        level.set(game.level);
+        limitOn.set(game.limitOn);
+        menu.set(false);
+        helpOpen.set(false);
+        resultOpen.set(false);
+        settle.set(null);
+        screen.set("go");
+      });
+      return;
+    }
 
     const left = Math.max(
       RESUME_FLOOR_MS,
@@ -510,6 +679,7 @@ function App() {
     pausedLeft = left;
 
     batch(() => {
+      kind.set("gomoku");
       round.update((n) => n + 1);
       board.set(boardFromMoves(game.moves));
       moves.set(game.moves);
@@ -524,6 +694,9 @@ function App() {
       leftMs.set(left);
       thinking.set(false);
       hover.set(-1);
+      paused.set(false);
+      reviewAt.set(null);
+      replaying.set(false);
       settle.set(null);
       resultOpen.set(false);
       menu.set(false);
@@ -535,27 +708,156 @@ function App() {
   /** 从主页的开局设置开始新对局，同时放弃旧的「继续游戏」存档。 */
   function startNewGame() {
     pausedLeft = 0;
+    const next = kind();
     batch(() => {
       savedGame.set(null);
-      screen.set("game");
-      reset();
+      goInitial.set(null);
+      menu.set(false);
+      helpOpen.set(false);
+      resultOpen.set(false);
+      settle.set(null);
+      if (next === "go") {
+        screen.set("go");
+      } else {
+        screen.set("game");
+        reset();
+      }
     });
     Storage.removeItem(GAME_KEY).catch(() => {});
   }
 
+  function startAiai() {
+    mode.set("aiai");
+    startNewGame();
+  }
+
   /** 保存并回到主页；棋盘状态留在内存里，点继续再恢复。 */
   function goHome() {
-    writeGame().catch(() => {});
+    if (screen() === "game") {
+      writeGame().catch(() => {});
+    } else if (screen() === "go") {
+      writeGoGame().catch(() => {});
+    }
     batch(() => {
       menu.set(false);
       resultOpen.set(false);
       settle.set(null);
+      paused.set(false);
+      replaying.set(false);
+      reviewAt.set(null);
+      helpOpen.set(false);
       screen.set("home");
     });
   }
 
   function toggleSound() {
     soundOn.update((on) => !on);
+  }
+
+  function addRecord(input: RecordInput, quiet = false) {
+    const record = makeRecord(input);
+    records.update((list) => [record, ...list].slice(0, RECORDS_LIMIT));
+    if (!quiet) flash("棋谱已保存到棋谱库");
+  }
+
+  function saveGomokuRecord(quiet = false) {
+    if (moves().length === 0) {
+      flash("还没有落子，无法保存");
+      return;
+    }
+    addRecord(
+      {
+        game: "gomoku",
+        mode: mode(),
+        level: level(),
+        moves: moves(),
+        result: over() ? statusText() : undefined,
+      },
+      quiet,
+    );
+  }
+
+  function solveTsumego(id: string) {
+    study.update((s) =>
+      s.tsumego.includes(id)
+        ? s
+        : { ...s, tsumego: addStudyId(s.tsumego, id) },
+    );
+  }
+
+  function completeLesson(id: string) {
+    study.update((s) =>
+      s.lessons.includes(id)
+        ? s
+        : { ...s, lessons: addStudyId(s.lessons, id) },
+    );
+  }
+
+  function deleteRecord(id: string) {
+    records.update((list) => list.filter((r) => r.id !== id));
+    flash("棋谱已删除");
+  }
+
+  function handleGoSnapshot(game: SavedGame | null) {
+    savedGame.set(game);
+    if (!loaded()) return;
+    if (game) {
+      Storage.setItem(GAME_KEY, JSON.stringify(game)).catch(() => {});
+    } else {
+      Storage.removeItem(GAME_KEY).catch(() => {});
+    }
+  }
+
+  function handleGoFinish(finishInfo: GoFinish) {
+    const pve = mode() === "pve";
+    const outcome = finishInfo.outcome;
+    const prev = progress();
+    const streak = pve
+      ? outcome === "win"
+        ? prev.streak + 1
+        : 0
+      : prev.streak;
+    const breakdown: Breakdown = pve
+      ? scoreGame({
+          outcome,
+          level: level(),
+          moves: finishInfo.moves,
+          seconds: finishInfo.seconds,
+          undos: 0,
+          timeouts: 0,
+          streak,
+        })
+      : { lines: [], total: 0, stars: 0 };
+    const delta = breakdown.total;
+    const total = pve ? Math.max(0, prev.score + delta) : prev.score;
+    const best = pve ? Math.max(prev.best, delta) : prev.best;
+    const record: GameRecord = {
+      at: Date.now(),
+      outcome,
+      level: level(),
+      mode: mode(),
+      game: "go",
+      goSize: goSize(),
+      result: finishInfo.result,
+      moves: finishInfo.moves,
+      seconds: finishInfo.seconds,
+      delta,
+      stars: breakdown.stars,
+    };
+    batch(() => {
+      progress.set({
+        score: total,
+        best,
+        streak,
+        win: prev.win + (outcome === "win" ? 1 : 0),
+        loss: prev.loss + (outcome === "loss" ? 1 : 0),
+        draw: prev.draw + (outcome === "draw" ? 1 : 0),
+        history: [record, ...prev.history].slice(0, HISTORY_LIMIT),
+      });
+      savedGame.set(null);
+      paused.set(false);
+    });
+    Storage.removeItem(GAME_KEY).catch(() => {});
   }
 
   /** 退出前先把设置与当前对局写进 storage，再请求宿主关闭界面。 */
@@ -565,31 +867,36 @@ function App() {
     } catch {
       /* 存储满 / 不可用时仍然允许退出 */
     }
-    // 在主页退出时不要用内存里的旧棋盘覆盖 goHome 写好的存档
-    if (screen() === "game") {
-      try {
-        await writeGame();
-      } catch {
-        /* 同上 */
-      }
+    try {
+      if (screen() === "game") await writeGame();
+      else if (screen() === "go") await writeGoGame();
+    } catch {
+      /* 同上 */
     }
     try {
       process.exit(0);
     } catch {
       // 宿主没给权限 / 没有退出处理器时至少回到主页，不把界面卡在菜单里
-      if (screen() === "game") goHome();
+      if (screen() !== "home") goHome();
     }
   }
 
   /* ---------------------------- 副作用 ---------------------------- */
-  // 读取存档（分数、战绩、设置）与未下完的对局
+  // 读取存档（分数、战绩、设置）、未下完的对局、棋谱库与学棋进度
   effect(() => {
     let alive = true;
-    Promise.all([Storage.getItem(SAVE_KEY), Storage.getItem(GAME_KEY)])
-      .then(([raw, gameRaw]) => {
+    Promise.all([
+      Storage.getItem(SAVE_KEY),
+      Storage.getItem(GAME_KEY),
+      Storage.getItem(RECORDS_KEY),
+      Storage.getItem(STUDY_KEY),
+    ])
+      .then(([raw, gameRaw, recordsRaw, studyRaw]) => {
         if (!alive) return;
         const saved = readProgress(raw);
         const game = readSavedGame(gameRaw);
+        const savedRecords = readRecords(recordsRaw);
+        const savedStudy = readStudy(studyRaw);
 
         batch(() => {
           if (saved) progress.set(saved);
@@ -598,27 +905,32 @@ function App() {
               ? (JSON.parse(raw) as Record<string, unknown>)
               : {};
             const lv = meta.level;
-            if (
-              lv === "easy" ||
-              lv === "normal" ||
-              lv === "hard" ||
-              lv === "hell"
-            ) {
-              level.set(lv);
+            if (LEVELS.includes(lv as Difficulty)) {
+              level.set(lv as Difficulty);
             }
             const md = meta.mode;
-            if (md === "pve" || md === "pvp") mode.set(md);
+            if (MODES.includes(md as Mode)) mode.set(md as Mode);
             if (typeof meta.limitOn === "boolean") limitOn.set(meta.limitOn);
             if (typeof meta.soundOn === "boolean") soundOn.set(meta.soundOn);
+            if (meta.kind === "go" || meta.kind === "gomoku") {
+              kind.set(meta.kind);
+            }
+            if (GO_SIZES.includes(meta.goSize as GoSize)) {
+              goSize.set(meta.goSize as GoSize);
+            }
           } catch {
             /* 存档损坏时忽略设置，沿用默认值 */
           }
           // 没有设置档但有对局档时，至少让主页显示存档里的设置
           if (!raw && game) {
+            kind.set(game.kind);
             mode.set(game.mode);
             level.set(game.level);
             limitOn.set(game.limitOn);
+            if (game.goSize) goSize.set(game.goSize);
           }
+          records.set(savedRecords);
+          study.set(savedStudy);
           savedGame.set(game);
           loaded.set(true);
         });
@@ -633,18 +945,42 @@ function App() {
     };
   });
 
-  // 写存档：只在加载完成后写，避免开局用默认值覆盖旧记录
+  // 写设置：只在加载完成后写，避免开局用默认值覆盖旧记录
   effect(() => {
     const p = progress();
     const lv = level();
     const md = mode();
     const lim = limitOn();
     const so = soundOn();
+    const kd = kind();
+    const gs = goSize();
     if (!loaded()) return;
     Storage.setItem(
       SAVE_KEY,
-      JSON.stringify({ ...p, level: lv, mode: md, limitOn: lim, soundOn: so }),
+      JSON.stringify({
+        ...p,
+        level: lv,
+        mode: md,
+        limitOn: lim,
+        soundOn: so,
+        kind: kd,
+        goSize: gs,
+      }),
     ).catch(() => {});
+  });
+
+  // 棋谱库
+  effect(() => {
+    const list = records();
+    if (!loaded()) return;
+    Storage.setItem(RECORDS_KEY, JSON.stringify(list)).catch(() => {});
+  });
+
+  // 学棋 / 残局进度
+  effect(() => {
+    const s = study();
+    if (!loaded()) return;
+    Storage.setItem(STUDY_KEY, JSON.stringify(s)).catch(() => {});
   });
 
   // 写对局存档：每次落子 / 悔棋 / 改设置后写一次；结束或重开时删掉
@@ -706,8 +1042,8 @@ function App() {
   effect(() => {
     const s = secondsLeft();
     const active = timed();
-    const paused = (menu() && localMode()) || resultOpen() || helpOpen();
-    if (!active || paused || over() !== null) return;
+    const pausedNow = (menu() && localMode()) || resultOpen() || helpOpen();
+    if (!active || pausedNow || over() !== null) return;
     if (s > URGENT_SECONDS || s <= 0) {
       tickedSecond = 0;
       return;
@@ -718,10 +1054,15 @@ function App() {
   });
 
   // 落子倒计时：本地对局菜单打开时暂停，回来后接着走，不会靠开关菜单刷新时间。
-  // 将来的联网模式不在 LOCAL_MODES 里，倒计时会继续走。
   effect(() => {
     const active = timed();
-    const paused = (menu() && localMode()) || resultOpen() || helpOpen();
+    const pausedNow =
+      (menu() && localMode()) ||
+      resultOpen() ||
+      helpOpen() ||
+      paused() ||
+      reviewAt() !== null ||
+      replaying();
     const r = round();
 
     if (!active) {
@@ -731,7 +1072,7 @@ function App() {
       return;
     }
 
-    if (paused) {
+    if (pausedNow) {
       pausedLeft =
         deadline > 0
           ? Math.max(0, deadline - Date.now())
@@ -761,7 +1102,7 @@ function App() {
     return () => clearInterval(timer);
   });
 
-  // AI 落子：思考放在定时器里，重置/悔棋会作废旧任务
+  // AI 落子：人机模式执白；人机大战双方都由 AI 走，约 2 秒一手。
   effect(() => {
     const r = round();
     const m = mode();
@@ -770,22 +1111,44 @@ function App() {
     const lv = level();
     const sc = screen();
     const help = helpOpen();
+    const pausedNow = paused();
+    const review = reviewAt();
+    const replay = replaying();
+    const menuNow = menu();
+    const result = resultOpen();
 
-    if (sc !== "game" || m !== "pve" || o !== null || t !== AI || help) {
+    const aiTurn = m === "aiai" || (m === "pve" && t === AI);
+    if (
+      sc !== "game" ||
+      !aiTurn ||
+      o !== null ||
+      help ||
+      pausedNow ||
+      review !== null ||
+      replay ||
+      menuNow ||
+      result
+    ) {
       thinking.set(false);
       return;
     }
 
     thinking.set(true);
+    const delay = m === "aiai" ? AIAI_DELAY_MS : 110;
     const timer = setTimeout(() => {
       if (untracked(() => round()) !== r) return;
       if (untracked(() => over()) !== null) return;
-      if (untracked(() => turn()) !== AI) return;
+      if (untracked(() => paused())) return;
+      if (untracked(() => reviewAt()) !== null) return;
+      if (untracked(() => replaying())) return;
+      if (untracked(() => menu())) return;
       if (untracked(() => helpOpen())) return;
+      if (untracked(() => resultOpen())) return;
 
+      const now = untracked(() => turn());
       let choice: AiChoice | null = null;
       try {
-        choice = findBestMove(untracked(() => board()), AI, lv);
+        choice = findBestMove(untracked(() => board()), now, lv);
       } catch {
         choice = null;
       }
@@ -800,16 +1163,34 @@ function App() {
 
       if (untracked(() => round()) !== r) return;
       if (untracked(() => over()) !== null) return;
+      if (untracked(() => paused())) return;
+      if (untracked(() => reviewAt()) !== null) return;
+      if (untracked(() => menu())) return;
       if (untracked(() => helpOpen())) return;
       thinking.set(false);
 
       if (choice) {
         const i = idx(choice.x, choice.y);
-        if (untracked(() => board())[i] === 0) commit(choice.x, choice.y, AI);
+        if (untracked(() => board())[i] === 0) commit(choice.x, choice.y, now);
       }
-    }, 110);
+    }, delay);
 
     return () => clearTimeout(timer);
+  });
+
+  // 人机大战整局回放：每 620ms 前进一手，到末尾自动停。
+  effect(() => {
+    if (!replaying()) return;
+    const timer = setInterval(() => {
+      const at = untracked(() => reviewAt());
+      const total = untracked(() => moves().length);
+      if (at === null || at >= total) {
+        replaying.set(false);
+        return;
+      }
+      reviewAt.set(at + 1);
+    }, REPLAY_MS);
+    return () => clearInterval(timer);
   });
 
   // 提示条自动消失
@@ -870,6 +1251,8 @@ function App() {
         <If when={screen() === "home"}>
           <Home
             saved={savedGame()}
+            kind={kind()}
+            goSize={goSize()}
             score={progress().score}
             best={progress().best}
             win={progress().win}
@@ -879,14 +1262,25 @@ function App() {
             level={level()}
             limitOn={limitOn()}
             soundOn={soundOn()}
+            recordCount={records().length}
+            learnDone={study().lessons.length}
+            learnTotal={learnTotal}
+            tsumegoDone={study().tsumego.length}
+            tsumegoTotal={TSUMEGO_PROBLEMS.length}
             onContinue={continueGame}
             onNewGame={startNewGame}
+            onAiai={startAiai}
+            onKind={(k) => kind.set(k)}
             onMode={(m) => mode.set(m)}
             onLevel={(l) => level.set(l)}
             onLimit={(on) => limitOn.set(on)}
+            onGoSize={(s) => goSize.set(s)}
             onSound={toggleSound}
             onHelp={() => helpOpen.set(true)}
             onExit={exitGame}
+            onTsumego={() => screen.set("tsumego")}
+            onLearn={() => screen.set("learn")}
+            onRecords={() => screen.set("records")}
           />
         </If>
 
@@ -899,240 +1293,388 @@ function App() {
               paddingHorizontal: 14,
             }}
           >
-          {/* 标题栏 */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "flex-end",
-              justifyContent: "space-between",
-              paddingTop: 12,
-            }}
-          >
-            <View>
-              <Text
-                style={{
-                  fontSize: 25,
-                  fontWeight: "700",
-                  color: C.ink,
-                  letterSpacing: 2,
-                }}
-              >
-                五子棋
-              </Text>
-              <Text
-                style={{
-                  fontSize: 10,
-                  fontWeight: "600",
-                  color: C.muted,
-                  letterSpacing: 2.2,
-                  marginTop: 3,
-                }}
-              >
-                {mode() === "pve"
-                  ? `人机 · ${LEVEL_NAME[level()]}`
-                  : "本地双人"}{" "}
-                · 15 × 15
-              </Text>
-            </View>
-            <PressButton
-              label="菜单"
-              testID="open-menu"
-              onPress={() => menu.set(true)}
-            />
-          </View>
-
-          {/* 状态条 */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              height: 22,
-              marginTop: 12,
-              marginBottom: 6,
-            }}
-          >
+            {/* 标题栏 */}
             <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-            >
-              <StoneDot player={turn()} size={13} dim={over() !== null} />
-              <Text
-                style={{
-                  fontSize: 14.5,
-                  lineHeight: 20,
-                  fontWeight: "600",
-                  color: C.ink,
-                }}
-              >
-                {statusText()}
-              </Text>
-            </View>
-            <Text
               style={{
-                fontSize: 12,
-                lineHeight: 16,
-                color: C.muted,
-                fontVariant: ["tabular-nums"],
+                flexDirection: "row",
+                alignItems: "flex-end",
+                justifyContent: "space-between",
+                paddingTop: 12,
               }}
             >
-              {moves().length} 手 · {progress().score} 分
-            </Text>
-          </View>
+              <View>
+                <Text
+                  style={{
+                    fontSize: 25,
+                    fontWeight: "700",
+                    color: C.ink,
+                    letterSpacing: 2,
+                  }}
+                >
+                  五子棋
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 10,
+                    fontWeight: "600",
+                    color: C.muted,
+                    letterSpacing: 2.2,
+                    marginTop: 3,
+                  }}
+                >
+                  {mode() === "pve"
+                    ? `人机 · ${LEVEL_NAME[level()]}`
+                    : mode() === "aiai"
+                      ? `人机大战 · ${LEVEL_NAME[level()]}`
+                      : "本地双人"}{" "}
+                  · 15 × 15
+                </Text>
+              </View>
+              <PressButton
+                label="菜单"
+                testID="open-menu"
+                onPress={() => menu.set(true)}
+              />
+            </View>
 
-          {/* 倒计时 */}
-          <If when={limitOn()}>
+            {/* 状态条 */}
             <View
               style={{
                 flexDirection: "row",
                 alignItems: "center",
-                gap: 8,
-                height: 16,
-                marginBottom: 4,
-                opacity: timed() ? 1 : 0.32,
+                justifyContent: "space-between",
+                height: 22,
+                marginTop: 12,
+                marginBottom: 6,
               }}
             >
               <View
-                testID={lowTime() ? "timer-urgent" : "timer-track"}
-                style={{
-                  flex: 1,
-                  height: 7,
-                  borderRadius: 4,
-                  borderWidth: 1,
-                  borderColor: lowTime()
-                    ? blink()
-                      ? C.accent
-                      : "rgba(196,72,52,0.3)"
-                    : "transparent",
-                  backgroundColor: "rgba(58,40,22,0.10)",
-                  overflow: "hidden",
-                }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
               >
-                <View
-                  testID="timer-fill"
-                  style={{
-                    width: `${Math.max(0, Math.min(100, (timeRatio() * 1000) / 10))}%`,
-                    height: 5,
-                    borderRadius: 3,
-                    backgroundColor: lowTime() ? C.accent : "#c8a250",
-                  }}
+                <StoneDot
+                  player={reviewAt() === null ? turn() : 1}
+                  size={13}
+                  dim={over() !== null || paused()}
                 />
+                <Text
+                  style={{
+                    fontSize: 14.5,
+                    lineHeight: 20,
+                    fontWeight: "600",
+                    color: C.ink,
+                  }}
+                >
+                  {statusText()}
+                </Text>
               </View>
               <Text
-                testID="timer-text"
                 style={{
-                  fontSize: 11.5,
-                  fontWeight: "700",
-                  color: lowTime() ? C.accent : C.muted,
+                  fontSize: 12,
+                  lineHeight: 16,
+                  color: C.muted,
                   fontVariant: ["tabular-nums"],
-                  width: 30,
-                  textAlign: "right",
                 }}
               >
-                {over() !== null ? "—" : formatDuration(secondsLeft())}
+                {viewMoves().length} 手 · {progress().score} 分
               </Text>
             </View>
-          </If>
 
-          {/* 棋盘 */}
-          <View
-            style={{
-              flex: 1,
-              alignItems: "center",
-              justifyContent: "center",
-              paddingVertical: 6,
-            }}
-            onLayout={(bounds) => {
-              const w = bounds.size.width;
-              const h = bounds.size.height;
-              const s = Math.max(0, Math.floor(Math.min(w, h, 620)));
-              if (s !== boardSize()) boardSize.set(s);
-            }}
-          >
-            <If when={boardSize() > 0}>
-              <View style={{ width: boardSize(), height: boardSize() }}>
-                <Board
-                  size={boardSize}
-                  board={board}
-                  last={lastIndex}
-                  winLine={winLine}
-                  hover={hover}
-                  canPlay={canPlay}
-                  turn={turn}
-                  onPlay={playAt}
-                  setHover={(i) => hover.set(i)}
-                  clearHover={(i) => {
-                    if (hover() === i) hover.set(-1);
-                  }}
-                />
-
-                {/* 轻提示：悔棋 / 超时 / 换难度 */}
+            {/* 倒计时 */}
+            <If when={limitOn() && mode() !== "aiai"}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  height: 16,
+                  marginBottom: 4,
+                  opacity: timed() ? 1 : 0.32,
+                }}
+              >
                 <View
-                  pointerEvents="none"
+                  testID={lowTime() ? "timer-urgent" : "timer-track"}
                   style={{
-                    position: "absolute",
-                    top: 10,
-                    left: 0,
-                    right: 0,
-                    alignItems: "center",
-                    opacity: notice() === null ? 0 : 1,
-                    transform: [
-                      { translateY: notice() === null ? -6 : 0 },
-                    ],
-                    transitionProperty: "transform, opacity",
-                    transitionDuration: 220,
+                    flex: 1,
+                    height: 7,
+                    borderRadius: 4,
+                    borderWidth: 1,
+                    borderColor: lowTime()
+                      ? blink()
+                        ? C.accent
+                        : "rgba(196,72,52,0.3)"
+                      : "transparent",
+                    backgroundColor: "rgba(58,40,22,0.10)",
+                    overflow: "hidden",
                   }}
                 >
                   <View
+                    testID="timer-fill"
                     style={{
-                      paddingVertical: 6,
-                      paddingHorizontal: 14,
-                      borderRadius: 16,
-                      backgroundColor: "rgba(43,36,28,0.9)",
-                      boxShadow: "0 6px 16px rgba(40,26,12,0.26)",
+                      width: `${Math.max(0, Math.min(100, (timeRatio() * 1000) / 10))}%`,
+                      height: 5,
+                      borderRadius: 3,
+                      backgroundColor: lowTime() ? C.accent : "#c8a250",
+                    }}
+                  />
+                </View>
+                <Text
+                  testID="timer-text"
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: "700",
+                    color: lowTime() ? C.accent : C.muted,
+                    fontVariant: ["tabular-nums"],
+                    width: 30,
+                    textAlign: "right",
+                  }}
+                >
+                  {over() !== null ? "—" : formatDuration(secondsLeft())}
+                </Text>
+              </View>
+            </If>
+
+            {/* 回看提示 */}
+            <If when={reviewAt() !== null}>
+              <View
+                style={{
+                  marginBottom: 4,
+                  paddingVertical: 4,
+                  paddingHorizontal: 10,
+                  borderRadius: 8,
+                  backgroundColor: "rgba(192,68,44,0.08)",
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Text
+                  style={{ fontSize: 10.5, color: C.accent, fontWeight: "600" }}
+                >
+                  {replaying() ? "整局回放中" : "回看模式"} · 第{" "}
+                  {reviewAt() ?? 0} / {moves().length} 手
+                </Text>
+                <Text style={{ fontSize: 10.5, color: C.muted }}>
+                  {reviewAt() === moves().length
+                    ? "点「继续」回到实时对局"
+                    : "用上一步 / 下一步翻看"}
+                </Text>
+              </View>
+            </If>
+
+            {/* 棋盘 */}
+            <View
+              style={{
+                flex: 1,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingVertical: 6,
+              }}
+              onLayout={(bounds) => {
+                const w = bounds.size.width;
+                const h = bounds.size.height;
+                const s = Math.max(0, Math.floor(Math.min(w, h, 620)));
+                if (s !== boardSize()) boardSize.set(s);
+              }}
+            >
+              <If when={boardSize() > 0}>
+                <View style={{ width: boardSize(), height: boardSize() }}>
+                  <Board
+                    size={boardSize}
+                    board={viewBoard}
+                    last={lastIndex}
+                    winLine={winLine}
+                    hover={hover}
+                    canPlay={canPlay}
+                    turn={turn}
+                    onPlay={playAt}
+                    setHover={(i) => hover.set(i)}
+                    clearHover={(i) => {
+                      if (hover() === i) hover.set(-1);
+                    }}
+                  />
+
+                  {/* 轻提示：悔棋 / 超时 / 换难度 */}
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      top: 10,
+                      left: 0,
+                      right: 0,
+                      alignItems: "center",
+                      opacity: notice() === null ? 0 : 1,
+                      transform: [
+                        { translateY: notice() === null ? -6 : 0 },
+                      ],
+                      transitionProperty: "transform, opacity",
+                      transitionDuration: 220,
                     }}
                   >
-                    <Text
+                    <View
                       style={{
-                        fontSize: 12.5,
-                        fontWeight: "600",
-                        color: "#fdfaf3",
+                        paddingVertical: 6,
+                        paddingHorizontal: 14,
+                        borderRadius: 16,
+                        backgroundColor: "rgba(43,36,28,0.9)",
+                        boxShadow: "0 6px 16px rgba(40,26,12,0.26)",
                       }}
                     >
-                      {notice() ?? ""}
-                    </Text>
+                      <Text
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: "600",
+                          color: "#fdfaf3",
+                        }}
+                      >
+                        {notice() ?? ""}
+                      </Text>
+                    </View>
                   </View>
+                </View>
+              </If>
+            </View>
+
+            {/* 底部操作 */}
+            <If
+              when={mode() === "aiai"}
+              else={
+                <View
+                  style={{
+                    flexDirection: "row",
+                    gap: 10,
+                    paddingTop: 6,
+                    paddingBottom: 10,
+                  }}
+                >
+                  <PressButton
+                    label="悔棋"
+                    hint={`撤销上一步，扣 ${UNDO_PENALTY} 分`}
+                    testID="undo"
+                    onPress={undo}
+                    disabled={moves().length === 0 || over() !== null}
+                    grow
+                  />
+                  <PressButton
+                    label="重新开始"
+                    hint="清空棋盘，黑棋先行"
+                    testID="restart"
+                    onPress={reset}
+                    tone="primary"
+                    grow
+                  />
+                </View>
+              }
+            >
+              <View style={{ gap: 7, paddingTop: 5, paddingBottom: 10 }}>
+                <View style={{ flexDirection: "row", gap: 7 }}>
+                  <PressButton
+                    label={paused() ? "继续" : "暂停"}
+                    testID="aiai-pause"
+                    onPress={togglePause}
+                    tone="primary"
+                    grow
+                  />
+                  <PressButton
+                    label="上一步"
+                    testID="aiai-step-back"
+                    onPress={stepBack}
+                    disabled={
+                      moves().length === 0 ||
+                      (reviewAt() !== null && reviewAt()! <= 0)
+                    }
+                    grow
+                  />
+                  <PressButton
+                    label="下一步"
+                    testID="aiai-step-forward"
+                    onPress={stepForward}
+                    disabled={
+                      reviewAt() === null ||
+                      reviewAt()! >= moves().length
+                    }
+                    grow
+                  />
+                  <PressButton
+                    label="整局回放"
+                    testID="aiai-replay"
+                    onPress={startReplay}
+                    disabled={moves().length < 2}
+                    grow
+                  />
+                </View>
+                <View style={{ flexDirection: "row", gap: 7 }}>
+                  <PressButton
+                    label="保存棋谱"
+                    testID="aiai-save"
+                    onPress={() => saveGomokuRecord()}
+                    disabled={moves().length === 0}
+                    grow
+                  />
+                  <PressButton
+                    label="重新开始"
+                    testID="aiai-restart"
+                    onPress={reset}
+                    grow
+                  />
                 </View>
               </View>
             </If>
           </View>
+        </If>
 
-          {/* 底部操作 */}
-          <View
-            style={{
-              flexDirection: "row",
-              gap: 10,
-              paddingTop: 6,
-              paddingBottom: 10,
-            }}
-          >
-            <PressButton
-              label="悔棋"
-              hint={`撤销上一步，扣 ${UNDO_PENALTY} 分`}
-              testID="undo"
-              onPress={undo}
-              disabled={moves().length === 0 || over() !== null}
-              grow
-            />
-            <PressButton
-              label="重新开始"
-              hint="清空棋盘，黑棋先行"
-              testID="restart"
-              onPress={reset}
-              tone="primary"
-              grow
-            />
-          </View>
-        </View>
+        <If when={screen() === "go"}>
+          <GoGame
+            initial={goInitial()}
+            mode={mode()}
+            level={level()}
+            limitOn={limitOn()}
+            goSize={goSize()}
+            soundOn={soundOn()}
+            helpOpen={helpOpen()}
+            score={progress().score}
+            best={progress().best}
+            streak={progress().streak}
+            win={progress().win}
+            loss={progress().loss}
+            draw={progress().draw}
+            history={progress().history}
+            onSnapshot={handleGoSnapshot}
+            onFinish={handleGoFinish}
+            onRecord={(record) => addRecord(record, true)}
+            onHome={goHome}
+            onExit={exitGame}
+            onHelp={() => helpOpen.set(true)}
+            onClear={clearHistory}
+            onSound={toggleSound}
+            onMode={(m) => mode.set(m)}
+            onLevel={(l) => level.set(l)}
+            onLimit={(on) => limitOn.set(on)}
+            onGoSize={(s) => goSize.set(s)}
+            playSound={playSound}
+          />
+        </If>
+
+        <If when={screen() === "tsumego"}>
+          <Tsumego
+            solved={study().tsumego}
+            onSolved={solveTsumego}
+            onBack={() => screen.set("home")}
+          />
+        </If>
+
+        <If when={screen() === "learn"}>
+          <Learn
+            completed={study().lessons}
+            onComplete={completeLesson}
+            onBack={() => screen.set("home")}
+          />
+        </If>
+
+        <If when={screen() === "records"}>
+          <Records
+            records={records()}
+            onDelete={deleteRecord}
+            onBack={() => screen.set("home")}
+          />
         </If>
       </View>
 
@@ -1142,6 +1684,7 @@ function App() {
       {/* 菜单 */}
       <If when={screen() === "game" && menu()}>
         <MenuPanel
+          kind="gomoku"
           score={progress().score}
           best={progress().best}
           streak={progress().streak}
@@ -1153,15 +1696,26 @@ function App() {
           level={level()}
           limitOn={limitOn()}
           soundOn={soundOn()}
+          moveCount={moves().length}
+          paused={paused()}
+          reviewAt={reviewAt()}
+          canSaveRecord={moves().length > 0}
           onMode={switchMode}
           onLevel={switchLevel}
           onLimit={switchLimit}
           onSound={toggleSound}
           onHome={goHome}
-          onHelp={() => helpOpen.set(true)}
+          onHelp={() => {
+            helpOpen.set(true);
+          }}
           onExit={exitGame}
           onClear={clearHistory}
           onClose={() => menu.set(false)}
+          onSaveRecord={() => saveGomokuRecord()}
+          onTogglePause={togglePause}
+          onStepBack={stepBack}
+          onStepForward={stepForward}
+          onReplay={startReplay}
         />
       </If>
 
@@ -1171,6 +1725,7 @@ function App() {
           outcome={settle()!.outcome}
           title={settle()!.title}
           scored={settle()!.scored}
+          mode={mode()}
           level={level()}
           moves={settle()!.moves}
           seconds={settle()!.seconds}
@@ -1178,14 +1733,15 @@ function App() {
           total={settle()!.total}
           best={settle()!.best}
           streak={settle()!.streak}
+          onSave={() => saveGomokuRecord()}
           onClose={() => resultOpen.set(false)}
           onRestart={reset}
         />
       </If>
 
-      {/* 帮助：在主页与对局菜单都能打开，覆盖在最上层 */}
+      {/* 帮助：在主页、五子棋和围棋菜单都能打开，覆盖在最上层 */}
       <If when={helpOpen()}>
-        <HelpPanel onClose={() => helpOpen.set(false)} />
+        <HelpPanel kind={kind()} onClose={() => helpOpen.set(false)} />
       </If>
     </SafeAreaView>
   );

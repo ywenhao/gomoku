@@ -1,7 +1,7 @@
 import { Text, View, effect, signal } from "nsh";
 import { C, PressButton } from "./ui";
 import { formatDuration, type Breakdown, type Outcome } from "../lib/score";
-import type { Difficulty } from "../lib/gomoku";
+import type { Difficulty, Mode } from "../lib/gomoku";
 
 const LEVEL_NAME: Record<Difficulty, string> = {
   easy: "简单",
@@ -11,7 +11,13 @@ const LEVEL_NAME: Record<Difficulty, string> = {
 };
 
 /** 结算文案：按结果和星级给不同的情绪反馈 */
-function flavor(outcome: Outcome, stars: number, scored: boolean): string {
+function flavor(
+  outcome: Outcome,
+  stars: number,
+  scored: boolean,
+  mode?: Mode,
+): string {
+  if (mode === "aiai") return "人机大战对局，不计入积分。";
   if (!scored) return "本地双人对局，不计入积分。";
   if (outcome === "win") {
     if (stars >= 3) return "完美的一局，AI 全程没找到机会。";
@@ -29,6 +35,7 @@ export function ResultPanel(props: {
   outcome: Outcome;
   title: string;
   scored: boolean;
+  mode?: Mode;
   level: Difficulty;
   moves: number;
   seconds: number;
@@ -38,6 +45,7 @@ export function ResultPanel(props: {
   streak: number;
   onRestart: () => void;
   onClose: () => void;
+  onSave?: () => void;
 }) {
   const shown = signal(false);
   const count = signal(0);
@@ -175,7 +183,12 @@ export function ResultPanel(props: {
             lineHeight: 19,
           }}
         >
-          {flavor(props.outcome, props.breakdown.stars, props.scored)}
+          {flavor(
+            props.outcome,
+            props.breakdown.stars,
+            props.scored,
+            props.mode,
+          )}
         </Text>
 
         {/* 计分明细 */}
@@ -281,6 +294,18 @@ export function ResultPanel(props: {
             <Text style={{ fontSize: 12, fontWeight: "600", color: C.accent }}>
               连续 {props.streak} 场胜利
             </Text>
+          </View>
+        </If>
+
+        <If when={props.onSave !== undefined}>
+          <View style={{ width: "100%", marginTop: 14 }}>
+            <PressButton
+              label="保存棋谱"
+              hint="存进棋谱库，之后可以逐步回放"
+              onPress={props.onSave!}
+              testID="result-save"
+              grow
+            />
           </View>
         </If>
 

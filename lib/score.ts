@@ -5,7 +5,7 @@
  * 总分在结算时累加，最高分取单局最高。
  */
 
-import type { Difficulty } from "./gomoku";
+import type { Difficulty, GameKind } from "./gomoku";
 
 export type Outcome = "win" | "loss" | "draw";
 
@@ -55,7 +55,12 @@ export interface GameRecord {
   at: number;
   outcome: Outcome;
   level: Difficulty;
-  mode: "pve" | "pvp";
+  mode: "pve" | "pvp" | "aiai";
+  game: GameKind;
+  /** 围棋棋盘的规格 */
+  goSize?: 9 | 13 | 19;
+  /** 结果文案，例如「黑棋 3.5 子胜」 */
+  result?: string;
   moves: number;
   seconds: number;
   delta: number;

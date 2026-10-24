@@ -1,8 +1,8 @@
 {
-  "name": "gomoku",
-  "version": "1.3.0",
+  "name": "yijing",
+  "version": "1.4.0",
   "private": true,
-  "description": "跨平台五子棋 · Native Shell (nsh.dev) · Windows / Linux / Android / macOS / Web",
+  "description": "弈境 · 跨平台围棋与五子棋 · Native Shell (nsh.dev) · Windows / Linux / Android / macOS / Web",
   "engines": {
     "node": ">=20"
   },

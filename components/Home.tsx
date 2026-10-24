@@ -1,12 +1,18 @@
 import { Scroll, Text, View } from "nsh";
 import { C, ConfirmButton, PressButton, Segmented, StoneDot } from "./ui";
 import { formatDuration, formatStamp } from "../lib/score";
-import type { Difficulty, Mode } from "../lib/gomoku";
+import type {
+  Difficulty,
+  GameKind,
+  Mode,
+} from "../lib/gomoku";
+import type { GoSize } from "../lib/go";
 import type { SavedGame } from "../lib/save";
 
 const MODES: readonly { key: Mode; label: string }[] = [
   { key: "pve", label: "人机" },
   { key: "pvp", label: "双人" },
+  { key: "aiai", label: "人机大战" },
 ];
 
 const LEVELS: readonly { key: Difficulty; label: string }[] = [
@@ -19,6 +25,12 @@ const LEVELS: readonly { key: Difficulty; label: string }[] = [
 const LIMITS: readonly { key: string; label: string }[] = [
   { key: "on", label: "开" },
   { key: "off", label: "关" },
+];
+
+const SIZES: readonly { key: string; label: string }[] = [
+  { key: "9", label: "9 路" },
+  { key: "13", label: "13 路" },
+  { key: "19", label: "19 路" },
 ];
 
 const LEVEL_NAME: Record<Difficulty, string> = {
@@ -46,34 +58,189 @@ function SectionTitle(props: { text: string }) {
 }
 
 function savedLabel(saved: SavedGame): string {
+  const name = saved.kind === "go" ? "围棋" : "五子棋";
   const who =
-    saved.mode === "pve" ? `人机 · ${LEVEL_NAME[saved.level]}` : "本地双人";
+    saved.mode === "pve"
+      ? `人机 · ${LEVEL_NAME[saved.level]}`
+      : saved.mode === "aiai"
+        ? "人机大战"
+        : "本地双人";
+  const size = saved.kind === "go" ? ` · ${saved.goSize ?? 19} 路` : "";
   const clock = saved.limitOn
     ? ` · 剩 ${formatDuration(Math.max(3, Math.ceil(saved.leftMs / 1000)))}`
     : "";
-  return `${who} · ${saved.moves.length} 手${clock}`;
+  const count =
+    saved.kind === "go"
+      ? (saved.goMoves?.length ?? 0)
+      : saved.moves.length;
+  return `${name}${size} · ${who} · ${count} 手${clock}`;
 }
 
-/** 启动页 / 游戏菜单：继续、新对局、设置、声音、退出。 */
+function KindCard(props: {
+  kind: GameKind;
+  selected: boolean;
+  title: string;
+  latin: string;
+  desc: string;
+  onPress: () => void;
+}) {
+  return (
+    <View
+      role="button"
+      testID={`seg-game-${props.kind}`}
+      accessibilityLabel={props.title}
+      accessibilityState={{ selected: props.selected }}
+      onPress={props.onPress}
+      style={{
+        flex: 1,
+        paddingVertical: 12,
+        paddingHorizontal: 13,
+        borderRadius: 16,
+        backgroundColor: props.selected ? C.ink : C.panel,
+        borderWidth: 1,
+        borderColor: props.selected ? C.ink : C.line,
+        gap: 5,
+        boxShadow: props.selected
+          ? "0 8px 18px rgba(40,26,12,0.20)"
+          : "0 1px 2px rgba(58,40,22,0.06)",
+      }}
+      activeStyle={{ opacity: 0.72 }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+        <StoneDot player={1} size={15} />
+        <StoneDot player={2} size={15} />
+        <Text
+          style={{
+            fontSize: 15,
+            fontWeight: "700",
+            color: props.selected ? "#fdfaf3" : C.ink,
+            letterSpacing: 1,
+            marginLeft: 2,
+          }}
+        >
+          {props.title}
+        </Text>
+      </View>
+      <Text
+        style={{
+          fontSize: 8.5,
+          fontWeight: "600",
+          letterSpacing: 1.6,
+          color: props.selected ? "rgba(253,250,243,0.62)" : C.muted,
+        }}
+      >
+        {props.latin}
+      </Text>
+      <Text
+        style={{
+          fontSize: 10.5,
+          lineHeight: 15,
+          color: props.selected ? "rgba(253,250,243,0.78)" : C.muted,
+        }}
+      >
+        {props.desc}
+      </Text>
+    </View>
+  );
+}
+
+function Entry(props: {
+  testID: string;
+  title: string;
+  sub: string;
+  badge?: string;
+  onPress: () => void;
+}) {
+  return (
+    <View
+      role="button"
+      testID={props.testID}
+      accessibilityLabel={props.title}
+      accessibilityHint={props.sub}
+      onPress={props.onPress}
+      style={{
+        flexGrow: 1,
+        flexBasis: 0,
+        minWidth: 136,
+        paddingVertical: 12,
+        paddingHorizontal: 13,
+        borderRadius: 15,
+        backgroundColor: C.panel,
+        borderWidth: 1,
+        borderColor: C.line,
+        gap: 3,
+        boxShadow: "0 1px 2px rgba(58,40,22,0.06)",
+      }}
+      activeStyle={{ opacity: 0.7 }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Text
+          style={{
+            fontSize: 13.5,
+            fontWeight: "700",
+            color: C.ink,
+            letterSpacing: 0.6,
+          }}
+        >
+          {props.title}
+        </Text>
+        <If when={props.badge}>
+          <View
+            style={{
+              paddingHorizontal: 5,
+              paddingVertical: 1,
+              borderRadius: 5,
+              backgroundColor: C.accentSoft,
+            }}
+          >
+            <Text
+              style={{ fontSize: 8.5, fontWeight: "700", color: C.accent }}
+            >
+              {props.badge ?? ""}
+            </Text>
+          </View>
+        </If>
+      </View>
+      <Text style={{ fontSize: 10, color: C.muted, lineHeight: 14 }}>
+        {props.sub}
+      </Text>
+    </View>
+  );
+}
+
+/** 启动页：选棋类、继续或新开一局，以及残局 / 学棋 / 棋谱入口。 */
 export function Home(props: {
   saved: SavedGame | null;
+  kind: GameKind;
+  goSize: GoSize;
+  mode: Mode;
+  level: Difficulty;
+  limitOn: boolean;
+  soundOn: boolean;
   score: number;
   best: number;
   win: number;
   loss: number;
   draw: number;
-  mode: Mode;
-  level: Difficulty;
-  limitOn: boolean;
-  soundOn: boolean;
+  recordCount: number;
+  learnDone: number;
+  learnTotal: number;
+  tsumegoDone: number;
+  tsumegoTotal: number;
   onContinue: () => void;
   onNewGame: () => void;
+  onAiai: () => void;
+  onKind: (kind: GameKind) => void;
   onMode: (m: Mode) => void;
   onLevel: (l: Difficulty) => void;
   onLimit: (on: boolean) => void;
+  onGoSize: (size: GoSize) => void;
   onSound: () => void;
   onHelp: () => void;
   onExit: () => void;
+  onTsumego: () => void;
+  onLearn: () => void;
+  onRecords: () => void;
 }) {
   return (
     <Scroll
@@ -89,41 +256,60 @@ export function Home(props: {
       <View
         style={{
           width: "100%",
-          maxWidth: 440,
+          maxWidth: 460,
           flexGrow: 1,
           justifyContent: "center",
         }}
       >
-        <View style={{ alignItems: "center", marginBottom: 18 }}>
-          <View style={{ flexDirection: "row", gap: 6, marginBottom: 10 }}>
-            <StoneDot player={1} size={23} />
-            <StoneDot player={2} size={23} />
+        <View style={{ alignItems: "center", marginBottom: 16 }}>
+          <View style={{ flexDirection: "row", gap: 6, marginBottom: 8 }}>
+            <StoneDot player={1} size={22} />
+            <StoneDot player={2} size={22} />
           </View>
           <Text
             style={{
-              fontSize: 31,
+              fontSize: 33,
               fontWeight: "700",
               color: C.ink,
-              letterSpacing: 4,
-              marginLeft: 4,
+              letterSpacing: 8,
+              marginLeft: 8,
             }}
           >
-            五子棋
+            弈境
           </Text>
           <Text
             style={{
               fontSize: 9.5,
               fontWeight: "600",
               color: C.muted,
-              letterSpacing: 2.4,
-              marginTop: 4,
+              letterSpacing: 2.6,
+              marginTop: 3,
             }}
           >
-            GOMOKU · 15 × 15
+            YI JING · 围棋与五子棋
           </Text>
-          <Text style={{ fontSize: 11.5, color: C.muted, marginTop: 8 }}>
-            落子无悔 · 五连即胜
+          <Text style={{ fontSize: 11.5, color: C.muted, marginTop: 7 }}>
+            一枰天地 · 与 AI 手谈 · 从残局与课程入门
           </Text>
+        </View>
+
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <KindCard
+            kind="gomoku"
+            selected={props.kind === "gomoku"}
+            title="五子棋"
+            latin="GOMOKU · 15 × 15"
+            desc="五连即胜，节奏明快"
+            onPress={() => props.onKind("gomoku")}
+          />
+          <KindCard
+            kind="go"
+            selected={props.kind === "go"}
+            title="围棋"
+            latin="GO · 9 / 13 / 19"
+            desc="围地提子，变化无穷"
+            onPress={() => props.onKind("go")}
+          />
         </View>
 
         <View
@@ -133,20 +319,32 @@ export function Home(props: {
             borderRadius: 22,
             borderWidth: 1,
             borderColor: C.line,
-            padding: 18,
+            padding: 17,
+            marginTop: 14,
             boxShadow: "0 18px 44px rgba(40,26,12,0.14)",
           }}
         >
           <If
             when={props.saved}
             else={
-              <PressButton
-                label="开始新对局"
-                hint="按下面的设置开一局"
-                tone="primary"
-                testID="home-new"
-                onPress={props.onNewGame}
-              />
+              <View style={{ gap: 9 }}>
+                <PressButton
+                  label={
+                    props.kind === "go" ? "开始围棋对弈" : "开始五子棋"
+                  }
+                  subLabel={
+                    props.mode === "aiai"
+                      ? "AI 对 AI · 约 2 秒一手"
+                      : props.mode === "pve"
+                        ? `人机 · ${LEVEL_NAME[props.level]}`
+                        : "本地双人轮流落子"
+                  }
+                  hint="按下面的设置开一局"
+                  tone="primary"
+                  testID="home-new"
+                  onPress={props.onNewGame}
+                />
+              </View>
             }
           >
             {(saved) => (
@@ -203,13 +401,50 @@ export function Home(props: {
             )}
           </If>
 
-          <SectionTitle text="对战设置" />
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              gap: 9,
+              marginTop: 11,
+            }}
+          >
+            <Entry
+              testID="home-aiai"
+              title="人机大战"
+              sub="AI 对 AI · 可暂停、回放与保存棋谱"
+              badge="观战"
+              onPress={props.onAiai}
+            />
+            <Entry
+              testID="home-tsumego"
+              title="残局挑战"
+              sub={`${props.tsumegoDone} / ${props.tsumegoTotal} 道已解`}
+              badge="围棋"
+              onPress={props.onTsumego}
+            />
+            <Entry
+              testID="home-learn"
+              title="学棋"
+              sub={`${props.learnDone} / ${props.learnTotal} 课 · 按段位进阶`}
+              onPress={props.onLearn}
+            />
+            <Entry
+              testID="home-records"
+              title="棋谱库"
+              sub={`${props.recordCount} 份手动保存的棋谱`}
+              onPress={props.onRecords}
+            />
+          </View>
+
+          <SectionTitle text="对局设置" />
           <View style={{ gap: 11 }}>
             <View
               style={{
                 flexDirection: "row",
                 alignItems: "center",
                 justifyContent: "space-between",
+                gap: 10,
               }}
             >
               <Text style={{ fontSize: 13.5, color: C.ink }}>对战模式</Text>
@@ -220,15 +455,18 @@ export function Home(props: {
                 compact
               />
             </View>
-            <If when={props.mode === "pve"}>
+            <If when={props.mode !== "pvp"}>
               <View
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
                   justifyContent: "space-between",
+                  gap: 10,
                 }}
               >
-                <Text style={{ fontSize: 13.5, color: C.ink }}>AI 难度</Text>
+                <Text style={{ fontSize: 13.5, color: C.ink }}>
+                  {props.mode === "aiai" ? "AI 难度（双方）" : "AI 难度"}
+                </Text>
                 <Segmented
                   value={() => props.level}
                   options={LEVELS}
@@ -237,11 +475,36 @@ export function Home(props: {
                 />
               </View>
             </If>
+            <If when={props.kind === "go"}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                }}
+              >
+                <View>
+                  <Text style={{ fontSize: 13.5, color: C.ink }}>棋盘路数</Text>
+                  <Text style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                    新手推荐 9 路，正式对局 19 路
+                  </Text>
+                </View>
+                <Segmented
+                  value={() => String(props.goSize)}
+                  options={SIZES}
+                  onChange={(k) => props.onGoSize(Number(k) as GoSize)}
+                  compact
+                  idPrefix="go"
+                />
+              </View>
+            </If>
             <View
               style={{
                 flexDirection: "row",
                 alignItems: "center",
                 justifyContent: "space-between",
+                gap: 10,
               }}
             >
               <Text style={{ fontSize: 13.5, color: C.ink }}>
@@ -283,7 +546,8 @@ export function Home(props: {
               lineHeight: 17,
             }}
           >
-            设置用于新对局；「继续游戏」沿用存档里的模式与难度。
+            设置用于新对局；「继续游戏」沿用存档里的棋类、模式与难度。
+            人机大战由两个 AI 自动对弈，可随时暂停和逐步回看。
           </Text>
 
           <View
@@ -301,12 +565,12 @@ export function Home(props: {
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 13, color: C.ink }}>玩法与帮助</Text>
               <Text style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
-                规则、棋型、开局布局与攻防顺序
+                五子棋棋型、围棋规则、提子与数子
               </Text>
             </View>
             <PressButton
               label="查看帮助"
-              hint="打开五子棋规则与基础教学"
+              hint="打开规则与基础教学"
               testID="home-help"
               onPress={props.onHelp}
             />

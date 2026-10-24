@@ -1,8 +1,8 @@
 {
-  "name": "五子棋",
+  "name": "弈境",
   "id": "com.gomoku.app",
-  "version": "1.3.0",
-  "build": 4,
+  "version": "1.4.0",
+  "build": 5,
   "icon": "icon.png",
   "appearance": "light",
   "capabilities": {

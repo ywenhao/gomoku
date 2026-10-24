@@ -21,11 +21,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# 关于 Node 版本：这个项目本身不跑 Node（没有 package.json，打包、类型检查、
-# 测试全在 nsh 这一个二进制里，它自带 rolldown + oxc + QuickJS），所以不需要
-# actions/setup-node。CI 里出现的 Node 是各个 action 自己的运行时 —— 早先
-# actions/checkout@v4 之类声明的是 node20，GitHub 会强制在 node24 上跑并告警。
-# 现在统一到声明 node24 的版本（node24 就是当前的 LTS）：
+# 关于 Node 版本：这个项目本身不跑 Node（package.json 只有命令别名，打包、
+# 类型检查、测试全在 nsh 这一个二进制里，它自带 rolldown + oxc + QuickJS），
+# 所以不需要 actions/setup-node。CI 里出现的 Node 是各个 action 自己的运行时 ——
+# 早先 actions/checkout@v4 之类声明的是 node20，GitHub 会强制在 node24 上跑并
+# 告警。现在统一到声明 node24 的版本（node24 就是当前的 LTS）：
 #   checkout v7 / cache v6 / upload-artifact v7 / download-artifact v8 /
 #   setup-java v6 / action-gh-release v3
 # 其中 upload-artifact 只有 v7 起、download-artifact 只有 v8 起才是 node24。
@@ -71,11 +71,11 @@ jobs:
           set -euo pipefail
           # 产出 <out>/<name>/ 与 <out>/<name>.zip，zip 里是 <name>.exe 加旁边的 nsh/。
           nsh package --target windows -o dist/windows
-          mv dist/windows/*.zip dist/windows/gomoku-windows-x64.zip
+          mv dist/windows/*.zip dist/windows/yijing-windows-x64.zip
       - uses: actions/upload-artifact@v7
         with:
-          name: gomoku-windows-x64
-          path: dist/windows/gomoku-windows-x64.zip
+          name: yijing-windows-x64
+          path: dist/windows/yijing-windows-x64.zip
           if-no-files-found: error
 
   linux:
@@ -94,11 +94,11 @@ jobs:
           # 产出 <out>/<name>/（GTK runner + nsh/ + .desktop）和同名 .tar.gz。
           # 运行需要 GTK 4.14+，即 Ubuntu 24.04 及以上。
           nsh package --target linux -o dist/linux
-          mv dist/linux/*.tar.gz dist/linux/gomoku-linux-x64.tar.gz
+          mv dist/linux/*.tar.gz dist/linux/yijing-linux-x64.tar.gz
       - uses: actions/upload-artifact@v7
         with:
-          name: gomoku-linux-x64
-          path: dist/linux/gomoku-linux-x64.tar.gz
+          name: yijing-linux-x64
+          path: dist/linux/yijing-linux-x64.tar.gz
           if-no-files-found: error
 
   macos:
@@ -124,11 +124,11 @@ jobs:
           # 产出 ad hoc 签名的 .app；codesign 与 sips 由 Xcode 命令行工具提供。
           nsh package --target macos -o dist/macos
           # 用 ditto 而不是 zip：它保留 bundle 里的软链和权限位。
-          ditto -c -k --keepParent "dist/macos/五子棋.app" dist/macos/gomoku-macos-arm64.zip
+          ditto -c -k --keepParent "dist/macos/弈境.app" dist/macos/yijing-macos-arm64.zip
       - uses: actions/upload-artifact@v7
         with:
-          name: gomoku-macos-arm64
-          path: dist/macos/gomoku-macos-arm64.zip
+          name: yijing-macos-arm64
+          path: dist/macos/yijing-macos-arm64.zip
           if-no-files-found: error
 
   android:
@@ -174,11 +174,11 @@ jobs:
             # 但上不了应用商店。
             nsh package --target android -o dist/android
           fi
-          mv dist/android/*.apk dist/android/gomoku-android.apk
+          mv dist/android/*.apk dist/android/yijing-android.apk
       - uses: actions/upload-artifact@v7
         with:
-          name: gomoku-android
-          path: dist/android/gomoku-android.apk
+          name: yijing-android
+          path: dist/android/yijing-android.apk
           if-no-files-found: error
 
   web:
@@ -199,10 +199,10 @@ jobs:
           nsh package --target web -o dist/web
           cd dist/web
           # 用 ./* 而不是 .：zip 还没建出来，通配符展开时不会把压缩包自己圈进去，
-          # 解压后也是一个完整的「五子棋/」目录。
-          zip -qr gomoku-web.zip ./*
+          # 解压后也是一个完整的「弈境/」目录。
+          zip -qr yijing-web.zip ./*
       - uses: actions/upload-artifact@v7
         with:
-          name: gomoku-web
-          path: dist/web/gomoku-web.zip
+          name: yijing-web
+          path: dist/web/yijing-web.zip
           if-no-files-found: error

@@ -123,6 +123,8 @@ export function Segmented<T extends string>(props: {
   options: readonly { key: T; label: string }[];
   onChange: (key: T) => void;
   compact?: boolean;
+  /** testID 前缀，默认 seg；同一屏放多组分段控件时用来避免重名 */
+  idPrefix?: string;
 }) {
   return (
     <View
@@ -138,7 +140,7 @@ export function Segmented<T extends string>(props: {
         {(opt) => (
           <View
             role="button"
-            testID={`seg-${opt().key}`}
+            testID={`${props.idPrefix ?? "seg"}-${opt().key}`}
             accessibilityLabel={opt().label}
             accessibilityState={{ selected: props.value() === opt().key }}
             onPress={() => props.onChange(opt().key)}

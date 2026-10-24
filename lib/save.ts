@@ -3,6 +3,9 @@
  *
  * 只保存真正开始过、还没结束的对局；下完一局就清掉，避免“继续”一局已经
  * 分出胜负的棋。存档是 JSON，读到坏数据时当没有存档，绝不拦住启动。
+ *
+ * 从 1.4.0 起同一份存档同时支持五子棋和围棋；旧版 gomoku.game.v1
+ * 没有 kind 字段，按五子棋读取。
  */
 
 import {
@@ -12,14 +15,26 @@ import {
   idx,
   other,
   type Difficulty,
+  type GameKind,
   type Mode,
   type Move,
   type Player,
 } from "./gomoku";
+import {
+  GO_SIZES,
+  GO_KOMI,
+  goStateFromMoves,
+  type GoMove,
+  type GoSize,
+} from "./go";
 import { MOVE_SECONDS } from "./score";
 
 export interface SavedGame {
+  kind: GameKind;
+  /** 五子棋手数；围棋时为空，实际手数看 goMoves */
   moves: Move[];
+  goMoves?: GoMove[];
+  goSize?: GoSize;
   mode: Mode;
   level: Difficulty;
   limitOn: boolean;
@@ -53,8 +68,28 @@ function time(value: unknown, fallback: number): number {
 
 /** 存档里下一手轮到谁：黑白交替，由最后一手反推。 */
 export function savedTurn(game: SavedGame): Player {
-  const last = game.moves[game.moves.length - 1];
+  const last =
+    game.kind === "go"
+      ? game.goMoves?.[game.goMoves.length - 1]
+      : game.moves[game.moves.length - 1];
   return last ? other(last.p) : 1;
+}
+
+export function savedMoveCount(game: SavedGame): number {
+  return game.kind === "go" ? (game.goMoves?.length ?? 0) : game.moves.length;
+}
+
+function readMode(value: unknown): Mode {
+  return value === "pvp" || value === "aiai" ? value : "pve";
+}
+
+function readLevel(value: unknown): Difficulty {
+  return value === "easy" ||
+    value === "normal" ||
+    value === "hard" ||
+    value === "hell"
+    ? value
+    : "normal";
 }
 
 /** 解析并校验存档；不合法（或对局已结束）时返回 null。 */
@@ -69,6 +104,63 @@ export function readSavedGame(raw: string | null): SavedGame | null {
   }
   if (!value || typeof value !== "object") return null;
   const data = value as Record<string, unknown>;
+  const kind: GameKind = data.kind === "go" ? "go" : "gomoku";
+
+  const now = Date.now();
+  const mode = readMode(data.mode);
+  const level = readLevel(data.level);
+  const common = {
+    kind,
+    mode,
+    level,
+    limitOn: typeof data.limitOn === "boolean" ? data.limitOn : true,
+    leftMs:
+      typeof data.leftMs === "number" && Number.isFinite(data.leftMs)
+        ? Math.max(0, Math.min(FULL_MS, data.leftMs))
+        : FULL_MS,
+    undos: count(data.undos),
+    timeouts: count(data.timeouts),
+    startedAt: time(data.startedAt, now),
+    savedAt: time(data.savedAt, now),
+  };
+
+  if (kind === "go") {
+    if (!Array.isArray(data.goMoves) || data.goMoves.length === 0) return null;
+    const size = GO_SIZES.includes(data.goSize as GoSize)
+      ? (data.goSize as GoSize)
+      : 19;
+    const moves: GoMove[] = [];
+    for (const item of data.goMoves) {
+      if (!item || typeof item !== "object") return null;
+      const m = item as Record<string, unknown>;
+      if (
+        typeof m.x !== "number" ||
+        typeof m.y !== "number" ||
+        !Number.isInteger(m.x) ||
+        !Number.isInteger(m.y) ||
+        (m.p !== 1 && m.p !== 2) ||
+        (m.pass !== true && m.pass !== false)
+      ) {
+        return null;
+      }
+      moves.push({
+        x: m.x,
+        y: m.y,
+        p: m.p,
+        pass: m.pass === true,
+      });
+    }
+    const state = goStateFromMoves(size, moves);
+    // 两手虚手之后已经进入数子，不该出现在「继续游戏」里
+    if (!state || state.passes >= 2) return null;
+    return {
+      ...common,
+      moves: [],
+      goMoves: state.moves,
+      goSize: size,
+    };
+  }
+
   if (!Array.isArray(data.moves) || data.moves.length === 0) return null;
 
   const moves: Move[] = [];
@@ -107,28 +199,12 @@ export function readSavedGame(raw: string | null): SavedGame | null {
     moves.push(move);
   }
 
-  const now = Date.now();
-  const mode: Mode = data.mode === "pvp" ? "pvp" : "pve";
-  const level: Difficulty =
-    data.level === "easy" ||
-    data.level === "normal" ||
-    data.level === "hard" ||
-    data.level === "hell"
-      ? data.level
-      : "normal";
-
   return {
+    ...common,
+    kind: "gomoku",
     moves,
-    mode,
-    level,
-    limitOn: typeof data.limitOn === "boolean" ? data.limitOn : true,
-    leftMs:
-      typeof data.leftMs === "number" && Number.isFinite(data.leftMs)
-        ? Math.max(0, Math.min(FULL_MS, data.leftMs))
-        : FULL_MS,
-    undos: count(data.undos),
-    timeouts: count(data.timeouts),
-    startedAt: time(data.startedAt, now),
-    savedAt: time(data.savedAt, now),
   };
 }
+
+/** 给围棋数子用的贴目常量，保存时方便读取。 */
+export { GO_KOMI };
