@@ -1,10 +1,17 @@
 {
   "name": "五子棋",
   "id": "com.gomoku.app",
-  "version": "1.0.0",
-  "build": 1,
+  "version": "1.1.0",
+  "build": 2,
   "icon": "icon.png",
   "appearance": "light",
+  "capabilities": {
+    "fs": {
+      "read": ["${dataDir}"],
+      "write": ["${dataDir}"]
+    },
+    "statusBar": true
+  },
   "statusBar": {
     "foreground": "dark"
   }

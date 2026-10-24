@@ -7,6 +7,7 @@ import {
   Text,
   untracked,
   View,
+  type Signal,
 } from "nsh";
 import { SafeAreaView } from "nsh/base";
 import { keymap } from "nsh/keymap";
@@ -14,6 +15,7 @@ import { Storage } from "nsh/storage";
 import { Board } from "./components/Board";
 import { MenuPanel } from "./components/Menu";
 import { ResultPanel } from "./components/Result";
+import { SoundBank } from "./components/Sound";
 import { C, PressButton, StoneDot } from "./components/ui";
 import { fallbackMove, findBestMove, type AiChoice } from "./lib/ai";
 import {
@@ -40,6 +42,7 @@ import {
   type GameRecord,
   type Outcome,
 } from "./lib/score";
+import { loadSounds, type SoundName } from "./lib/sound";
 
 const HUMAN: Player = 1;
 const AI: Player = 2;
@@ -47,6 +50,12 @@ const SAVE_KEY = "gomoku.v2";
 const NO_LINE: number[] = [];
 
 type Mode = "pve" | "pvp";
+
+/** 本地对局（人机 / 双人）：菜单打开时暂停倒计时。将来加联网模式时不要放进来。 */
+const LOCAL_MODES: readonly Mode[] = ["pve", "pvp"];
+
+/** 最后几秒进入红色闪烁警告，并逐秒滴答。 */
+const URGENT_SECONDS = 5;
 
 const LEVEL_NAME: Record<Difficulty, string> = {
   easy: "简单",
@@ -141,6 +150,17 @@ function App() {
   const notice = signal<string | null>(null);
   const loaded = signal(false);
 
+  const soundSrc = signal<Partial<Record<SoundName, string>>>({});
+  const soundPrime = signal(0);
+  const sounds: Record<SoundName, Signal<number>> = {
+    place: signal(0),
+    tick: signal(0),
+    timeout: signal(0),
+    win: signal(0),
+    loss: signal(0),
+    draw: signal(0),
+  };
+
   /* ---------------------------- 派生 ---------------------------- */
   const lastIndex = computed(() => {
     const m = moves();
@@ -177,7 +197,10 @@ function App() {
       ? 0
       : Math.max(0, Math.min(1, leftMs() / (MOVE_SECONDS * 1000))),
   );
-  const lowTime = computed(() => timed() && secondsLeft() <= 8);
+  const localMode = computed(() => LOCAL_MODES.includes(mode()));
+  const lowTime = computed(() => timed() && secondsLeft() <= URGENT_SECONDS);
+  /** 红色边框的闪烁相位：只影响最后几秒的进度条。 */
+  const blink = signal(false);
 
   const statusText = computed(() => {
     const o = over();
@@ -195,6 +218,10 @@ function App() {
   /* ---------------------------- 动作 ---------------------------- */
   function flash(text: string) {
     notice.set(text);
+  }
+
+  function playSound(name: SoundName) {
+    sounds[name].update((n) => n + 1);
   }
 
   /** 结算：算分、写战绩、弹结算浮层 */
@@ -277,12 +304,18 @@ function App() {
       menu.set(false);
       resultOpen.set(true);
     });
+
+    // 双人局没有「我方」：任意一方连成五子都是赢棋；只有人机输给 AI 才放落败音
+    playSound(
+      r.kind === "draw" ? "draw" : outcome === "loss" && pve ? "loss" : "win",
+    );
   }
 
   function commit(x: number, y: number, p: Player) {
     const i = idx(x, y);
     if (board()[i] !== 0) return;
     if (over() !== null) return;
+    playSound("place");
     if (moves().length === 0) startedAt.set(Date.now());
 
     const res = applyMove(board(), moves(), { x, y, p });
@@ -303,6 +336,8 @@ function App() {
   function playAt(i: number) {
     if (!canPlay()) return;
     if (board()[i] !== 0) return;
+    // Web 桌面端没有触摸事件：借用第一次点击把静音预播做掉
+    soundPrime.update((n) => n + 1);
     const x = i % SIZE;
     commit(x, (i - x) / SIZE, turn());
   }
@@ -367,6 +402,7 @@ function App() {
       }
     }
     if (!spot) return;
+    playSound("timeout");
     timeouts.update((n) => n + 1);
     flash(
       mode() === "pve"
@@ -442,12 +478,53 @@ function App() {
     ).catch(() => {});
   });
 
-  // 落子倒计时：菜单打开时暂停，回来后接着走，不会靠开关菜单刷新时间
+  // 启动时合成音效；某个音效失败只是少了那一个，静音也能正常对局
+  effect(() => {
+    let alive = true;
+    loadSounds()
+      .then((srcs) => {
+        if (alive) soundSrc.set(srcs);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  });
+
+  // 最后 5 秒进度条边框红白闪烁，显得急一点
+  effect(() => {
+    if (!lowTime()) {
+      blink.set(false);
+      return;
+    }
+    blink.set(true);
+    const timer = setInterval(() => blink.update((v) => !v), 420);
+    return () => clearInterval(timer);
+  });
+
+  // 最后 5 秒逐秒滴答；菜单暂停期间跳过，关掉菜单不会补响
+  let tickedSecond = 0;
+  effect(() => {
+    const s = secondsLeft();
+    const active = timed();
+    const paused = (menu() && localMode()) || resultOpen();
+    if (!active || paused || over() !== null) return;
+    if (s > URGENT_SECONDS || s <= 0) {
+      tickedSecond = 0;
+      return;
+    }
+    if (s === tickedSecond) return;
+    tickedSecond = s;
+    playSound("tick");
+  });
+
+  // 落子倒计时：本地对局菜单打开时暂停，回来后接着走，不会靠开关菜单刷新时间。
+  // 将来的联网模式不在 LOCAL_MODES 里，倒计时会继续走。
   let deadline = 0;
   let pausedLeft = 0;
   effect(() => {
     const active = timed();
-    const paused = menu() || resultOpen();
+    const paused = (menu() && localMode()) || resultOpen();
     const r = round();
 
     if (!active) {
@@ -564,7 +641,10 @@ function App() {
   /* ---------------------------- 界面 ---------------------------- */
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-      <View style={{ flex: 1, alignItems: "center", backgroundColor: C.bg }}>
+      <View
+        style={{ flex: 1, alignItems: "center", backgroundColor: C.bg }}
+        onTouchStartCapture={() => soundPrime.update((n) => n + 1)}
+      >
         <View
           style={{
             flex: 1,
@@ -621,6 +701,7 @@ function App() {
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "space-between",
+              height: 22,
               marginTop: 12,
               marginBottom: 6,
             }}
@@ -629,13 +710,21 @@ function App() {
               style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
             >
               <StoneDot player={turn()} size={13} dim={over() !== null} />
-              <Text style={{ fontSize: 14.5, fontWeight: "600", color: C.ink }}>
+              <Text
+                style={{
+                  fontSize: 14.5,
+                  lineHeight: 20,
+                  fontWeight: "600",
+                  color: C.ink,
+                }}
+              >
                 {statusText()}
               </Text>
             </View>
             <Text
               style={{
                 fontSize: 12,
+                lineHeight: 16,
                 color: C.muted,
                 fontVariant: ["tabular-nums"],
               }}
@@ -657,10 +746,17 @@ function App() {
               }}
             >
               <View
+                testID={lowTime() ? "timer-urgent" : "timer-track"}
                 style={{
                   flex: 1,
-                  height: 5,
-                  borderRadius: 3,
+                  height: 7,
+                  borderRadius: 4,
+                  borderWidth: 1,
+                  borderColor: lowTime()
+                    ? blink()
+                      ? C.accent
+                      : "rgba(196,72,52,0.3)"
+                    : "transparent",
                   backgroundColor: "rgba(58,40,22,0.10)",
                   overflow: "hidden",
                 }}
@@ -792,6 +888,9 @@ function App() {
           </View>
         </View>
       </View>
+
+      {/* 音效播放器（隐藏） */}
+      <SoundBank srcs={soundSrc} triggers={sounds} prime={soundPrime} />
 
       {/* 菜单 */}
       <If when={menu()}>

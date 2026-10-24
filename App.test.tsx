@@ -230,3 +230,41 @@ test("菜单打开时倒计时暂停", async () => {
   expect(has(app.texts(), "0 手")).toBe(true);
   expect(has(app.texts(), "超时")).toBe(false);
 });
+
+test("双人模式菜单打开时倒计时也暂停", async () => {
+  const app = await fresh({ clock: {} });
+  await toPvp(app);
+  await app.press("id:open-menu");
+  await app.clock.fastForward(90000);
+  await app.press("id:menu-close");
+  await app.clock.runFor(600);
+  expect(has(app.texts(), "0 手")).toBe(true);
+  expect(has(app.texts(), "超时")).toBe(false);
+  expect(app.shows("id:timer-urgent")).toBe(false);
+});
+
+test("Web 上会挂载隐藏音效播放器", async () => {
+  const app = await open("./App.tsx", { storage: {}, platform: "web" });
+  await app.waitFor("id:sound-place");
+  for (const name of ["place", "tick", "timeout", "win", "loss", "draw"]) {
+    expect(app.count(`id:sound-${name}`)).toBe(1);
+  }
+  // 触发一次落子音效，确认隐藏播放器不会把对局弄崩
+  await app.press("id:cell-7-7");
+  expect(app.shows("id:stone-7-7-b")).toBe(true);
+});
+
+test("最后 5 秒进入红色闪烁警告", async () => {
+  const app = await fresh({ clock: {} });
+  await app.clock.fastForward(24000);
+  expect(app.shows("id:timer-track")).toBe(true);
+  expect(app.shows("id:timer-urgent")).toBe(false);
+
+  await app.clock.fastForward(1000);
+  expect(app.texts()).toContain("0:05");
+  expect(app.shows("id:timer-urgent")).toBe(true);
+
+  await app.clock.fastForward(1000);
+  expect(app.texts()).toContain("0:04");
+  expect(app.shows("id:timer-urgent")).toBe(true);
+});

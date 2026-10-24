@@ -1,6 +1,6 @@
 {
   "name": "gomoku",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "跨平台五子棋 · Native Shell (nsh.dev) · Windows / Linux / Android / macOS / Web",
   "engines": {

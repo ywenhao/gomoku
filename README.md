@@ -11,6 +11,7 @@ Direct2D / Android View / UIKit / HTML），不是 WebView 套壳。
 - **双人对战**：同一台设备轮流落子（不计分，只记战绩）。
 - 悔棋、重新开始；人机模式下悔棋会一次退回「你 + AI」两步。
 - 最后一手有红点标记，五连的子会红圈脉冲提示。
+- 落子、最后 5 秒滴答、超时、胜 / 负 / 和结算都有音效；音频由代码合成，不打包音频资源。
 - 桌面端鼠标悬停显示半透明落子预览；快捷键 `U` 悔棋、`R` 重开、`M` 菜单、`Esc` 关闭浮层。
 
 ## 菜单、计分与结算
@@ -37,10 +38,11 @@ Direct2D / Android View / UIKit / HTML），不是 WebView 套壳。
 总分只增不减到 0 为止（扣成负数会让分数失去意义）。
 
 **落子倒计时**：默认开启，每手 30 秒。选 30 秒是因为五子棋绝大多数落子都在 15 秒内
-完成，30 秒足够想清楚一手，又不会让人干等；最后 8 秒进度条转红。
+完成，30 秒足够想清楚一手，又不会让人干等；最后 5 秒进度条边框转红并闪烁、每秒滴答
+一声，让人知道该落子了。
 **超时的惩罚是「扣 10 分 + 系统替你落一手弱棋」，而不是直接判负**——既能止住拖时间，
-又不至于因为一次走神毁掉整局。菜单打开时计时暂停，关掉后接着走，不会靠开关菜单刷新时间。
-不想被催可以关掉限时。
+又不至于因为一次走神毁掉整局。人机 / 双人这类本地对局在菜单打开时计时暂停，关掉后接着
+走，不会靠开关菜单刷新时间；将来接入联网对局时，菜单不会暂停计时。不想被催可以关掉限时。
 
 **结算浮层**：卡片从 0.86 缩放到 1 弹入，星星逐颗弹跳出现，得分从 0 滚动到实际分数，
 按结果给一句情绪文案，再列出计分明细、本局得分、累计总分与连胜徽章。
@@ -56,16 +58,19 @@ gomoku/
 │   ├── Board.tsx        棋盘：Canvas 画木纹/网格/星位 + 225 个可点击交叉点
 │   ├── Menu.tsx         菜单：统计、设置、历史战绩、清空记录
 │   ├── Result.tsx       结算浮层：星级/分数滚动/计分明细/连胜徽章
+│   ├── Sound.tsx        隐藏的音效播放器（每个音效一个 Video）
 │   └── ui.tsx           按钮、分段控件、棋子圆点
 ├── lib/
 │   ├── gomoku.ts        纯规则：落子、胜负判定、和棋
 │   ├── score.ts         计分规则、格式化、战绩类型
 │   ├── ai.ts            AI：启发式评分 + alpha-beta 搜索
+│   ├── sound.ts         代码合成 WAV 音效（落子/滴答/超时/胜负和）
 │   ├── ai.test.ts       规则与 AI 单元测试
 │   ├── score.test.ts    计分规则单元测试
+│   ├── sound.test.ts    WAV 头、时长与峰值测试
 │   └── match.test.ts    自对弈回归（强度与单步耗时）
-├── App.test.tsx         界面流程测试（落子、悔棋、重开、判胜、菜单、计分、倒计时）
-├── nsh.json             应用名、id、版本、图标、亮色外观（版本号的唯一来源）
+├── App.test.tsx         界面流程测试（落子、悔棋、重开、判胜、菜单、计分、倒计时、音效）
+├── nsh.json             应用名、id、版本、图标、亮色外观与能力（版本号的唯一来源）
 ├── package.json         只有 scripts，没有依赖：命令别名 + 版本号镜像
 ├── scripts/
 │   ├── release.mjs      校验版本 / 工作区 / tag，然后打 tag 并推送
@@ -91,7 +96,7 @@ nsh 命令 —— **`npm` 只是别名，不是依赖**，项目没有 `dependen
 | `npm run dev:android` | `nsh run . --target android` | 需要已启动的模拟器或已连接的设备 |
 | `npm run dev:ios` | `nsh run . --target ios` | 仅 macOS + Xcode 可用 |
 | `npm run check` | `nsh check` | TypeScript 类型检查 |
-| `npm test` | `nsh test` | 全部 38 个测试 |
+| `npm test` | `nsh test` | 全部 43 个测试 |
 | `npm test -- lib/score.test.ts` | `nsh test lib/score.test.ts` | 只跑一个文件 |
 | `npm run verify` | `nsh check` + `nsh test` | 提交前跑一遍 |
 | `npm run build` | `nsh build .` | 编译成 QuickJS 字节码，不打包 |
@@ -121,15 +126,16 @@ github:longbridge/nsh` 装的，shim 在 `~/.local/share/mise/shims`，没进 PA
 
 ```sh
 npm run verify           # check + test
-nsh test                 # 只跑测试：规则、AI、计分、界面流程、自对弈
+nsh test                 # 只跑测试：规则、AI、计分、音效、界面流程、自对弈
 nsh test lib/score.test.ts
 nsh check                # TypeScript 类型检查
 ```
 
 界面测试通过 `testID` 驱动：`cell-x-y`、`stone-x-y-b`、`undo`、`restart`、
 `open-menu`、`menu-close`、`seg-pve` / `seg-hard` / `seg-on`、`clear-history`、
-`timer-text`、`result-restart`、`result-close`。倒计时用 `open(..., { clock: {} })`
-的手动时钟 + `app.clock.fastForward(30000)` 测，不需要真等 30 秒。
+`timer-text`、`timer-track` / `timer-urgent`、`sound-place` 等、`result-restart`、
+`result-close`。倒计时用 `open(..., { clock: {} })` 的手动时钟 +
+`app.clock.fastForward(30000)` 测，不需要真等 30 秒。
 `--target windows` / `--target web` 还能在真实平台上跑并截图。
 
 ## 打包
@@ -158,7 +164,7 @@ PR 和手动触发时跑六个 job：
 
 | Job | Runner | 产物 |
 | --- | --- | --- |
-| 类型检查与测试 | `ubuntu-24.04` | `nsh check` + 38 个测试 |
+| 类型检查与测试 | `ubuntu-24.04` | `nsh check` + 43 个测试 |
 | Windows x64 | `windows-2025` | `gomoku-windows-x64.zip` |
 | Linux x64 | `ubuntu-24.04` | `gomoku-linux-x64.tar.gz` |
 | macOS arm64 | `macos-26` | `gomoku-macos-arm64.zip` |
@@ -218,6 +224,16 @@ npm run release          # 打 tag 并推送，剩下的交给 CI
 - 单步实测最坏约 260ms（QuickJS），远低于运行时 2s 的单次调用上限；
   即使抛错也有 `fallbackMove` 兜底，对局不会卡死。
 
+**音效**（`lib/sound.ts` + `components/Sound.tsx`）
+- 不打包音频、不加依赖：启动时用代码合成 6 段 22.05kHz / 单声道 / 16-bit PCM WAV
+  （落子、滴答、超时、胜、负、和），每段按峰值归一化，再缓存起来。
+- 原生把 WAV 写到 `<dataDir>/sounds/gomoku-<name>-v1.wav`，把**绝对路径**交给
+  1×1 的隐藏 `Video` 播放；Web 直接生成 Blob URL。某个文件写失败只会少了那个音效。
+  这里不能用 `file://`：声明了 `capabilities` 后，nsh 的媒体地址检查只放行
+  http(s)、`asset:`、`data:` 和相对/绝对路径，`file://` 会被拒绝且没有声音。
+- 最后 5 秒每秒滴答一次，菜单暂停期间不补响；Web 在第一次触摸时静音预播一次，
+  避开浏览器的自动播放限制。
+
 **性能与内存**
 - 棋盘用一维 `number[]`，每次落子生成新数组（不可变），每个交叉点的棋子值用
   `computed` 单独订阅，落一子只更新受影响的节点，不是整盘重绘。
@@ -228,13 +244,15 @@ npm run release          # 打 tag 并推送，剩下的交给 CI
   清掉，快捷键绑定随组件销毁自动解绑；AI 任务用 `round` 计数器作废旧任务。
 - 每子最多 225 手，`moves` 数组有上界；战绩最多 40 条，存档一次写一个 JSON。
 
-**存档**
+**存档与权限**
 - `nsh/storage` 里一个 key（`gomoku.v2`）：分数、最高分、连胜、胜平负、战绩、模式、
   难度、限时开关。加载完成后才允许写入，避免开局用默认值覆盖旧记录；坏档直接忽略。
+- `nsh.json` 只声明两样能力：`fs.read` / `fs.write` 限定在 `${dataDir}`（写音效文件）
+  和 `statusBar`（亮色状态栏）；没有网络权限。
 
 **跨平台**
-- 只用 `nsh` / `nsh/base` / `nsh/storage` / `nsh/keymap` / `nsh/device` 的跨平台 API，
-  无平台分支。
+- 只用 `nsh` / `nsh/base` / `nsh/storage` / `nsh/keymap` / `nsh/device` 的跨平台 API；
+  唯一的平台分支是音效地址（原生落地文件 / Web 用 Blob URL）。
 - 棋盘尺寸由 `onLayout` 实测可用空间后取 `min(宽, 高, 620)`，手机竖屏、平板、
   桌面窗口自适应；`SafeAreaView` 处理刘海与状态栏。
 - 菜单面板高度按 `windowSize().height` 计算并整体可滚动，小屏（320×568）也放得下。
