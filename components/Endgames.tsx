@@ -353,6 +353,7 @@ export function Endgames(props: {
                   <PressButton
                     label={c()}
                     testID={`endgames-level-${c()}`}
+                    tone={level() === c() ? "primary" : "default"}
                     onPress={() => {
                       level.set(c());
                       page.set(0);
@@ -368,6 +369,7 @@ export function Endgames(props: {
                 <PressButton
                   label={c()}
                   testID={`endgames-status-${c()}`}
+                  tone={status() === c() ? "primary" : "default"}
                   onPress={() => {
                     status.set(c());
                     page.set(0);

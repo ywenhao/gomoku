@@ -1,4 +1,4 @@
-import { Text, View, effect, signal, type Accessor } from "nsh";
+import { Text, View, computed, effect, signal, type Accessor } from "nsh";
 
 /** 全局配色：暖木色棋盘 + 纸感背景 */
 export const C = {
@@ -23,7 +23,7 @@ export function PressButton(props: {
   testID?: string;
   size?: "default" | "large";
 }) {
-  const primary = props.tone === "primary";
+  const primary = computed(() => props.tone === "primary");
   return (
     <View
       role="button"
@@ -39,12 +39,12 @@ export function PressButton(props: {
         paddingVertical: props.size === "large" ? 16 : 11,
         paddingHorizontal: 18,
         borderRadius: 12,
-        backgroundColor: primary ? C.ink : C.panel,
-        borderWidth: primary ? 0 : 1,
+        backgroundColor: primary() ? C.ink : C.panel,
+        borderWidth: primary() ? 0 : 1,
         borderColor: C.line,
         alignItems: "center",
         justifyContent: "center",
-        boxShadow: primary
+        boxShadow: primary()
           ? "0 3px 8px rgba(58,40,22,0.20)"
           : "0 1px 2px rgba(58,40,22,0.07)",
       }}
@@ -55,7 +55,7 @@ export function PressButton(props: {
         style={{
           fontSize: props.size === "large" ? 18 : 15,
           fontWeight: props.size === "large" ? "700" : "600",
-          color: primary ? "#fdfaf3" : C.ink,
+          color: primary() ? "#fdfaf3" : C.ink,
         }}
       >
         {props.label}
@@ -65,7 +65,7 @@ export function PressButton(props: {
           style={{
             fontSize: 11,
             fontWeight: "500",
-            color: primary ? "#e9dfd2" : C.muted,
+            color: primary() ? "#e9dfd2" : C.muted,
             marginTop: 3,
             textAlign: "center",
             fontVariant: ["tabular-nums"],
