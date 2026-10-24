@@ -14,6 +14,7 @@ import {
   type Move,
 } from "./gomoku";
 import { GO_SIZES, goStateFromMoves, type GoMove, type GoSize } from "./go";
+import { isCheckerPlayers, type CheckerPlayers } from "./race";
 
 export interface StoredRecord {
   id: string;
@@ -25,6 +26,7 @@ export interface StoredRecord {
   moves: Move[];
   actions?: Action[];
   initialBoard?: number[];
+  checkerPlayers?: CheckerPlayers;
   goMoves?: GoMove[];
   result?: string;
   savedAt: number;
@@ -41,6 +43,7 @@ export interface RecordInput {
   moves?: Move[];
   actions?: Action[];
   initialBoard?: number[];
+  checkerPlayers?: CheckerPlayers;
   goMoves?: GoMove[];
   result?: string;
   name?: string;
@@ -64,6 +67,8 @@ export function makeRecord(input: RecordInput): StoredRecord {
     result,
     actions: input.actions,
     initialBoard: input.initialBoard,
+    checkerPlayers:
+      input.game === "checkers" ? (input.checkerPlayers ?? 2) : undefined,
     savedAt,
   };
 }
@@ -164,7 +169,23 @@ export function readRecords(raw: string | null): StoredRecord[] {
       if (!Array.isArray(data.actions)) continue;
       const initialBoard = data.initialBoard as number[] | undefined;
       if (initialBoard !== undefined && !Array.isArray(initialBoard)) continue;
-      if (!replayMatch(game, data.actions as Action[], initialBoard)) continue;
+      if (game === "checkers" && data.checkerPlayers !== undefined)
+        if (!isCheckerPlayers(data.checkerPlayers)) continue;
+      const checkerPlayers: CheckerPlayers | undefined =
+        game === "checkers"
+          ? isCheckerPlayers(data.checkerPlayers)
+            ? data.checkerPlayers
+            : 2
+          : undefined;
+      if (
+        !replayMatch(
+          game,
+          data.actions as Action[],
+          initialBoard,
+          checkerPlayers,
+        )
+      )
+        continue;
       out.push({
         id: data.id,
         name: name || recordTitle(game, level, savedAt, result),
@@ -174,6 +195,7 @@ export function readRecords(raw: string | null): StoredRecord[] {
         moves: [],
         actions: data.actions as Action[],
         initialBoard,
+        checkerPlayers,
         result,
         savedAt,
       });
@@ -234,16 +256,16 @@ export function readRecords(raw: string | null): StoredRecord[] {
 }
 
 /** 记录里的最后一手颜色：用于棋谱回放的下一手提示。 */
-export function recordNextPlayer(record: StoredRecord): 1 | 2 {
+export function recordNextPlayer(record: StoredRecord): number {
   if (record.actions)
-    return Math.min(
-      2,
+    return (
       replayMatch(
         record.game as Exclude<GameKind, "gomoku" | "go">,
         record.actions,
         record.initialBoard,
-      )?.state.turn ?? 1,
-    ) as 1 | 2;
+        record.checkerPlayers ?? 2,
+      )?.state.turn ?? 1
+    );
   const list = record.game === "go" ? (record.goMoves ?? []) : record.moves;
   const last = list[list.length - 1];
   return last ? other(last.p) : 1;

@@ -22,6 +22,22 @@ const MODE_NAME = {
   aiai: MODE_LABELS.aiai,
 } as const;
 
+function modeLabel(record: StoredRecord): string {
+  if (record.game === "checkers") {
+    const players = record.checkerPlayers ?? 2;
+    if (record.mode === "pvp") return `${players} 人轮流`;
+    if (players > 2) return `${MODE_NAME[record.mode]} · ${players} 人`;
+  }
+  return MODE_NAME[record.mode];
+}
+
+function playerLabel(record: StoredRecord, player: number): string {
+  if (record.game === "chess") return player === 1 ? "白棋" : "黑棋";
+  if (record.game === "xiangqi") return player === 1 ? "红方" : "黑方";
+  if (record.game === "connect6") return player === 1 ? "黑棋" : "白棋";
+  return `玩家${player}`;
+}
+
 function Header(props: {
   title: string;
   sub: string;
@@ -118,7 +134,7 @@ function RecordRow(props: { record: StoredRecord; onOpen: () => void }) {
           {props.record.name}
         </Text>
         <Text style={{ fontSize: 10, color: C.muted }}>
-          {MODE_NAME[props.record.mode]} · {LEVEL_NAME[props.record.level]} ·{" "}
+          {modeLabel(props.record)} · {LEVEL_NAME[props.record.level]} ·{" "}
           {go ? `${props.record.goSize ?? 19} 路 · ` : ""}
           {count} 手 · {formatStamp(props.record.savedAt)}
         </Text>
@@ -139,6 +155,7 @@ function RecordView(props: {
   const boardSize = signal(0);
   const go = props.record.game === "go";
   const size = (props.record.goSize ?? 19) as 9 | 13 | 19;
+  const checkerPlayers = props.record.checkerPlayers ?? 2;
 
   // 切换到另一份棋谱时回到终局
   let lastId = props.record.id;
@@ -177,12 +194,25 @@ function RecordView(props: {
     return m ? m.y * 15 + m.x : -1;
   });
 
+  const actionMatch = computed(() => {
+    if (!props.record.actions) return null;
+    const at = Math.max(0, Math.min(step(), total));
+    return (
+      replayMatch(
+        props.record.game as ExtraKind,
+        props.record.actions.slice(0, at),
+        props.record.initialBoard,
+        checkerPlayers,
+      ) ?? createMatch(props.record.game as ExtraKind, checkerPlayers)
+    );
+  });
+
   const next = computed(() => {
+    if (props.record.actions) return actionMatch()?.state.turn ?? 1;
     const list = go ? (props.record.goMoves ?? []) : props.record.moves;
-    const at = step();
-    const m = list[at];
-    if (!m) return null;
-    return (m as { p: 1 | 2 }).p === 1 ? 2 : 1;
+    const at = Math.max(0, Math.min(step(), total));
+    if (at === 0) return 1;
+    return (list[at - 1] as { p: 1 | 2 }).p === 1 ? 2 : 1;
   });
 
   effect(() => {
@@ -246,13 +276,7 @@ function RecordView(props: {
             }
           >
             <MultiBoard
-              match={() =>
-                replayMatch(
-                  props.record.game as ExtraKind,
-                  props.record.actions!.slice(0, step()),
-                  props.record.initialBoard,
-                ) ?? createMatch(props.record.game as ExtraKind)
-              }
+              match={() => actionMatch()!}
               size={() => boardSize() || 340}
               selected={() => -1}
               targets={() => []}
@@ -343,7 +367,7 @@ function RecordView(props: {
             {props.record.name}
           </Text>
           <Text style={{ fontSize: 10, color: C.muted, marginTop: 3 }}>
-            {MODE_NAME[props.record.mode]} · {LEVEL_NAME[props.record.level]} ·{" "}
+            {modeLabel(props.record)} · {LEVEL_NAME[props.record.level]} ·{" "}
             {go ? `${size} 路 · ` : "15 路 · "}
             {total} 手{props.record.result ? ` · ${props.record.result}` : ""}
           </Text>
@@ -376,7 +400,7 @@ function RecordView(props: {
         </Text>
         <Text style={{ fontSize: 11, color: C.muted }}>
           {step() < total
-            ? `下一手：${next() === 1 ? "黑棋" : "白棋"}`
+            ? `下一手：${playerLabel(props.record, next())}`
             : formatStamp(props.record.savedAt)}
         </Text>
       </View>
@@ -406,7 +430,7 @@ function RecordView(props: {
               winLine={() => []}
               hover={() => -1}
               canPlay={() => false}
-              turn={() => next() ?? 1}
+              turn={() => (next() === 2 ? 2 : 1)}
               onPlay={() => {}}
               setHover={() => {}}
               clearHover={() => {}}

@@ -19,11 +19,25 @@ import { formatDuration, formatStamp } from "../lib/score";
 import type { Difficulty, GameKind, Mode } from "../lib/gomoku";
 import type { GoSize } from "../lib/go";
 import type { SavedGame } from "../lib/save";
+import type { CheckerPlayers } from "../lib/race";
 
 const MODES: readonly { key: Mode; label: string }[] = [
   { key: "pve", label: MODE_LABELS.pve },
   { key: "pvp", label: "双人" },
   { key: "aiai", label: MODE_LABELS.aiai },
+];
+
+const CHECKER_MODES: readonly { key: Mode; label: string }[] = [
+  { key: "pve", label: MODE_LABELS.pve },
+  { key: "pvp", label: "多人" },
+  { key: "aiai", label: MODE_LABELS.aiai },
+];
+
+const CHECKER_PLAYER_OPTIONS: readonly { key: string; label: string }[] = [
+  { key: "2", label: "2 人" },
+  { key: "3", label: "3 人" },
+  { key: "4", label: "4 人" },
+  { key: "6", label: "6 人" },
 ];
 
 const LEVELS: readonly { key: Difficulty; label: string }[] = [
@@ -132,20 +146,25 @@ function TimeChoice(props: {
 
 function savedLabel(saved: SavedGame): string {
   const name = gameName(saved.kind);
+  const checkers = saved.kind === "checkers";
+  const checkerPlayers = saved.checkerPlayers ?? 2;
   const who =
     saved.mode === "pve"
       ? `对战 AI · ${LEVEL_NAME[saved.level]}`
       : saved.mode === "aiai"
         ? "AI 观战"
-        : "本地双人";
+        : checkers
+          ? `${checkerPlayers} 人轮流`
+          : "本地双人";
   const size = saved.kind === "go" ? ` · ${saved.goSize ?? 19} 路` : "";
+  const people = checkers ? ` · ${checkerPlayers} 人` : "";
   const clock = saved.limitOn
     ? saved.clock
       ? ` · 剩 ${formatClock(sideOf(saved.clock, saved.clock.turn), saved.clock.control)}`
       : ` · 剩 ${formatDuration(Math.max(3, Math.ceil(saved.leftMs / 1000)))}`
     : "";
   const count = savedMoveCount(saved);
-  return `${name}${size} · ${who} · ${count} 手${clock}`;
+  return `${name}${size}${people} · ${who} · ${count} 手${clock}`;
 }
 
 function KindCard(props: {
@@ -285,6 +304,7 @@ export function Home(props: {
   saved: SavedGame | null;
   kind: GameKind;
   goSize: GoSize;
+  checkerPlayers: CheckerPlayers;
   timeControl: string;
   onTimeControl: (id: string) => void;
   mode: Mode;
@@ -309,6 +329,7 @@ export function Home(props: {
   onLevel: (l: Difficulty) => void;
   onLimit: (on: boolean) => void;
   onGoSize: (size: GoSize) => void;
+  onCheckerPlayers: (players: CheckerPlayers) => void;
   onSound: () => void;
   onHelp: () => void;
   onExit: () => void;
@@ -405,7 +426,9 @@ export function Home(props: {
                       ? "AI 对 AI · 约 2 秒一手"
                       : props.mode === "pve"
                         ? `对战 AI · ${LEVEL_NAME[props.level]}`
-                        : "本地双人轮流落子"
+                        : props.kind === "checkers"
+                          ? `${props.checkerPlayers} 人轮流落子`
+                          : "本地双人轮流落子"
                   }
                   hint="按下面的设置开一局"
                   tone="primary"
@@ -532,7 +555,7 @@ export function Home(props: {
               <Text style={{ fontSize: 13.5, color: C.ink }}>对战模式</Text>
               <Segmented
                 value={() => props.mode}
-                options={MODES}
+                options={props.kind === "checkers" ? CHECKER_MODES : MODES}
                 onChange={props.onMode}
                 compact
               />
@@ -578,6 +601,32 @@ export function Home(props: {
                   onChange={(k) => props.onGoSize(Number(k) as GoSize)}
                   compact
                   idPrefix="go"
+                />
+              </View>
+            </If>
+            <If when={props.kind === "checkers"}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                }}
+              >
+                <View style={{ flexShrink: 1 }}>
+                  <Text style={{ fontSize: 13.5, color: C.ink }}>对局人数</Text>
+                  <Text style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                    玩家 1 在下方，其余玩家使用上方营地
+                  </Text>
+                </View>
+                <Segmented
+                  value={() => String(props.checkerPlayers)}
+                  options={CHECKER_PLAYER_OPTIONS}
+                  onChange={(k) =>
+                    props.onCheckerPlayers(Number(k) as CheckerPlayers)
+                  }
+                  compact
+                  idPrefix="checker-players"
                 />
               </View>
             </If>

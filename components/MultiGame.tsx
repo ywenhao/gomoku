@@ -8,6 +8,7 @@ import {
   untracked,
   batch,
 } from "nsh";
+import { windowSize } from "nsh/device";
 import { C, PressButton, ConfirmButton } from "./ui";
 import { MultiBoard, PLAYER_COLORS } from "./MultiBoard";
 import { GuideStrip } from "./Guide";
@@ -18,6 +19,7 @@ import {
   matchAi,
   replayMatch,
   completesTurn,
+  clockSlotForMatch,
   type Match,
   type Action,
   type ExtraKind,
@@ -29,7 +31,11 @@ import {
   timeoutRoyal,
   type RoyalState,
 } from "../lib/royal";
-import { checkerMoves, ludoLegal } from "../lib/race";
+import {
+  checkerMoves,
+  ludoLegal,
+  type CheckerPlayers,
+} from "../lib/race";
 import { junqiMoves, validDeployment } from "../lib/junqi";
 import {
   createClock,
@@ -58,6 +64,7 @@ export function MultiGame(props: {
   level: Difficulty;
   limitOn: boolean;
   timeControl: string;
+  checkerPlayers: CheckerPlayers;
   helpOpen: boolean;
   onHome: () => void;
   onHelp: () => void;
@@ -67,12 +74,18 @@ export function MultiGame(props: {
   playSound: (name: SoundName) => void;
 }) {
   const initial = props.initial?.kind === props.kind ? props.initial : null;
+  const players: CheckerPlayers =
+    initial?.checkerPlayers ?? props.checkerPlayers;
   const initialBoard = signal(initial?.initialBoard);
   const match = signal<Match>(
     initial?.actions
-      ? (replayMatch(props.kind, initial.actions, initial.initialBoard) ??
-          createMatch(props.kind))
-      : createMatch(props.kind),
+      ? (replayMatch(
+          props.kind,
+          initial.actions,
+          initial.initialBoard,
+          players,
+        ) ?? createMatch(props.kind, players))
+      : createMatch(props.kind, players),
   );
   const actions = signal<Action[]>(initial?.actions ?? []),
     selected = signal(-1),
@@ -100,8 +113,8 @@ export function MultiGame(props: {
     restoreClock(
       props.kind,
       initial?.clock,
-      Math.min(2, match().state.turn) as Player,
-    ) ?? createClock(control, Math.min(2, match().state.turn) as Player),
+      clockSlotForMatch(match()),
+    ) ?? createClock(control, clockSlotForMatch(match())),
   );
   const view = computed(() =>
     review() === null
@@ -110,6 +123,7 @@ export function MultiGame(props: {
           props.kind,
           actions().slice(0, review()!),
           initialBoard(),
+          players,
         ) ?? match()),
   );
   const turn = computed(() => match().state.turn),
@@ -149,6 +163,7 @@ export function MultiGame(props: {
       moves: [],
       actions: actions(),
       initialBoard: initialBoard(),
+      checkerPlayers: props.kind === "checkers" ? players : undefined,
       mode: props.mode,
       level: props.level,
       limitOn: props.limitOn,
@@ -169,6 +184,12 @@ export function MultiGame(props: {
       state: { ...m.state, result: { winner, reason } },
     } as Match);
   }
+  function followingPlayer(player = turn()): number {
+    if (props.kind === "checkers")
+      return player === players ? 1 : player + 1;
+    if (props.kind === "ludo") return (player % 4) + 1;
+    return player === 1 ? 2 : 1;
+  }
   function syncTime(now = Date.now()): boolean {
     if (!props.limitOn || props.mode === "aiai") return true;
     const r = tickClock(clock(), now);
@@ -179,7 +200,7 @@ export function MultiGame(props: {
       const res =
         m.kind === "chess" || m.kind === "xiangqi"
           ? timeoutRoyal(m.state, loss)
-          : { winner: loss === 1 ? 2 : 1, reason: "超时判负" };
+          : { winner: followingPlayer(loss), reason: "超时判负" };
       props.playSound("timeout");
       timeouts.update((n) => n + 1);
       finish(res.winner, res.reason);
@@ -198,15 +219,19 @@ export function MultiGame(props: {
     if (props.limitOn && props.mode !== "aiai") {
       if (control.kind === "per-move" && endedTurn)
         nextClock = {
-          ...createClock(control, Math.min(2, next.state.turn) as Player, now),
+          ...createClock(control, clockSlotForMatch(next), now),
           moveNo: nextClock.moveNo + 1,
         };
       else if (endedTurn)
-        nextClock = clockAfterMove(nextClock, nextClock.turn, now).clock;
+        nextClock = clockAfterMove(
+          nextClock,
+          clockSlotForMatch(before),
+          now,
+        ).clock;
     } else {
       nextClock = {
         ...nextClock,
-        turn: Math.min(2, next.state.turn) as Player,
+        turn: clockSlotForMatch(next),
         moveNo: nextClock.moveNo + (endedTurn ? 1 : 0),
         lastAt: now,
       };
@@ -277,7 +302,7 @@ export function MultiGame(props: {
     }
     if (m.kind === "ludo") return;
     const v = m.state.board[i],
-      p = v > 0 ? 1 : v < 0 ? 2 : 0;
+      p = m.kind === "checkers" ? v : v > 0 ? 1 : v < 0 ? 2 : 0;
     if (p === turn()) {
       selected.set(selected() === i ? -1 : i);
       return;
@@ -316,12 +341,16 @@ export function MultiGame(props: {
     if (props.mode === "pve")
       while (
         n > 0 &&
-        replayMatch(props.kind, actions().slice(0, n), initialBoard())?.state
-          .turn !== 1
+        replayMatch(
+          props.kind,
+          actions().slice(0, n),
+          initialBoard(),
+          players,
+        )?.state.turn !== 1
       )
         n--;
     const a = actions().slice(0, n),
-      m = replayMatch(props.kind, a, initialBoard());
+      m = replayMatch(props.kind, a, initialBoard(), players);
     if (!m) return;
     const movers: Player[] = [];
     let cursor = m;
@@ -329,21 +358,21 @@ export function MultiGame(props: {
       const next = applyAction(cursor, action);
       if (!next) return;
       if (completesTurn(cursor, next, action))
-        movers.push(Math.min(2, cursor.state.turn) as Player);
+        movers.push(clockSlotForMatch(cursor));
       cursor = next;
     }
     const rewound = props.limitOn
       ? clockAfterUndo(
           clock(),
           movers,
-          Math.min(2, m.state.turn) as Player,
+          clockSlotForMatch(m),
           now,
           !blocked(),
         )
       : {
           clock: {
             ...clock(),
-            turn: Math.min(2, m.state.turn) as Player,
+            turn: clockSlotForMatch(m),
             moveNo: Math.max(0, clock().moveNo - movers.length),
             lastAt: now,
           },
@@ -360,7 +389,10 @@ export function MultiGame(props: {
       const result =
         m.kind === "chess" || m.kind === "xiangqi"
           ? timeoutRoyal(m.state, rewound.timeout)
-          : { winner: rewound.timeout === 1 ? 2 : 1, reason: "超时判负" };
+          : {
+              winner: followingPlayer(m.state.turn),
+              reason: "超时判负",
+            };
       finish(result.winner, result.reason);
     } else notice.set("已悔棋，撤回加秒与阶段加时，不返还已用时间");
   }
@@ -376,6 +408,7 @@ export function MultiGame(props: {
       level: props.level,
       actions: actions(),
       initialBoard: initialBoard(),
+      checkerPlayers: props.kind === "checkers" ? players : undefined,
       result: r
         ? `${r.winner ? `玩家${r.winner}胜` : "和棋"} · ${"reason" in r ? r.reason : "连六"}`
         : undefined,
@@ -517,12 +550,14 @@ export function MultiGame(props: {
       props.playSound("tick");
     }
   });
+  const menuMaxHeight = Math.max(280, Math.min(640, windowSize().height - 72));
   return (
-    <Scroll
-      testID={`${props.kind}-screen`}
-      style={{ flex: 1, width: "100%" }}
-      contentStyle={{ alignItems: "center", padding: 14 }}
-    >
+    <View style={{ flex: 1, width: "100%" }}>
+      <Scroll
+        testID={`${props.kind}-screen`}
+        style={{ flex: 1, width: "100%" }}
+        contentStyle={{ alignItems: "center", padding: 14 }}
+      >
       <View style={{ width: "100%", maxWidth: 600, gap: 10 }}>
         <View
           style={{
@@ -552,7 +587,9 @@ export function MultiGame(props: {
           {props.mode === "pvp"
             ? props.kind === "ludo"
               ? "四人轮流"
-              : "本地双人"
+              : props.kind === "checkers"
+                ? `${players} 人轮流`
+                : "本地双人"
             : props.mode === "aiai"
               ? "AI 观战"
               : "对战 AI"}{" "}
@@ -627,72 +664,6 @@ export function MultiGame(props: {
           >
             {notice()}
           </Text>
-        </If>
-        <If when={menu()}>
-          <View
-            style={{
-              padding: 12,
-              borderRadius: 14,
-              backgroundColor: C.panel,
-              gap: 8,
-            }}
-          >
-            <Text style={{ color: C.muted }}>
-              本地菜单打开期间暂停棋钟。新时限和难度在首页设置后开新局生效。
-            </Text>
-            <PressButton
-              label="返回对局"
-              testID="extra-menu-close"
-              onPress={() => menu.set(false)}
-            />
-            <PressButton
-              label="保存棋谱"
-              testID="extra-save"
-              disabled={
-                props.kind === "junqi" &&
-                props.mode !== "aiai" &&
-                !match().state.result
-              }
-              onPress={record}
-            />
-            <ConfirmButton
-              label="重新开始"
-              confirmLabel="确认重开"
-              testID="extra-restart"
-              onConfirm={() => {
-                settled = false;
-                batch(() => {
-                  match.set(createMatch(props.kind));
-                  actions.set([]);
-                  initialBoard.set(undefined);
-                  clock.set(createClock(control));
-                  review.set(null);
-                  replaying.set(false);
-                  setup.set(
-                    props.kind === "junqi" && props.mode !== "aiai" ? 1 : 0,
-                  );
-                  handoff.set(false);
-                  selected.set(-1);
-                  menu.set(false);
-                  paused.set(false);
-                  promotion.set(null);
-                  notice.set("");
-                  drawOffer.set(false);
-                  undos.set(0);
-                  timeouts.set(0);
-                  started.set(Date.now());
-                });
-              }}
-            />
-            <PressButton
-              label="返回首页"
-              testID="extra-home"
-              onPress={() => {
-                props.onSnapshot(snapshot());
-                props.onHome();
-              }}
-            />
-          </View>
         </If>
         <If
           when={handoff()}
@@ -914,7 +885,7 @@ export function MultiGame(props: {
               disabled={!human() || props.kind === "ludo"}
               testID="extra-resign"
               onConfirm={() => {
-                if (human()) finish(turn() === 1 ? 2 : 1, "认输");
+                if (human()) finish(followingPlayer(), "认输");
               }}
             />
             <If when={props.kind !== "ludo"}>
@@ -994,6 +965,116 @@ export function MultiGame(props: {
           </View>
         </If>
       </View>
-    </Scroll>
+      </Scroll>
+      <If when={menu()}>
+        <View
+          testID="extra-menu-overlay"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 20,
+          }}
+        >
+          <View
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(38,28,18,0.42)",
+            }}
+            onPress={() => menu.set(false)}
+          />
+          <Scroll
+            testID="extra-menu-panel"
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              maxHeight: menuMaxHeight,
+              backgroundColor: C.panel,
+              borderRadius: 22,
+              borderWidth: 1,
+              borderColor: C.line,
+              boxShadow: "0 24px 60px rgba(40,26,12,0.34)",
+            }}
+            contentStyle={{ padding: 18, gap: 9 }}
+          >
+            <View style={{ gap: 3, marginBottom: 3 }}>
+              <Text style={{ fontSize: 20, fontWeight: "700", color: C.ink }}>
+                对局菜单
+              </Text>
+              <Text style={{ fontSize: 10, color: C.muted, letterSpacing: 1.2 }}>
+                {gameName(props.kind)} · 本地菜单打开期间暂停棋钟
+              </Text>
+            </View>
+            <Text style={{ color: C.muted, fontSize: 12, lineHeight: 19 }}>
+              新时限和难度在首页设置后，开新局生效。
+            </Text>
+            <PressButton
+              label="返回对局"
+              testID="extra-menu-close"
+              onPress={() => menu.set(false)}
+            />
+            <PressButton
+              label="保存棋谱"
+              testID="extra-save"
+              disabled={
+                props.kind === "junqi" &&
+                props.mode !== "aiai" &&
+                !match().state.result
+              }
+              onPress={record}
+            />
+            <ConfirmButton
+              label="重新开始"
+              confirmLabel="确认重开"
+              testID="extra-restart"
+              onConfirm={() => {
+                settled = false;
+                batch(() => {
+                  const nextMatch = createMatch(props.kind, players);
+                  match.set(nextMatch);
+                  actions.set([]);
+                  initialBoard.set(undefined);
+                  clock.set(
+                    createClock(control, clockSlotForMatch(nextMatch)),
+                  );
+                  review.set(null);
+                  replaying.set(false);
+                  setup.set(
+                    props.kind === "junqi" && props.mode !== "aiai" ? 1 : 0,
+                  );
+                  handoff.set(false);
+                  selected.set(-1);
+                  menu.set(false);
+                  paused.set(false);
+                  promotion.set(null);
+                  notice.set("");
+                  drawOffer.set(false);
+                  undos.set(0);
+                  timeouts.set(0);
+                  started.set(Date.now());
+                });
+              }}
+            />
+            <PressButton
+              label="返回首页"
+              testID="extra-home"
+              onPress={() => {
+                props.onSnapshot(snapshot());
+                props.onHome();
+              }}
+            />
+          </Scroll>
+        </View>
+      </If>
+    </View>
   );
 }

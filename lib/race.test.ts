@@ -7,9 +7,13 @@ import {
   ludoPosition,
   CHECKER_HOLES,
   CHECKER_CAMPS,
+  CHECKER_PLAYER_COUNTS,
   createCheckers,
   checkerMoves,
   moveCheckers,
+  checkerCampIndices,
+  isCheckerPlayers,
+  oppositeCheckerCamp,
 } from "./race";
 test("飞行棋6起飞，无可走飞机自动过；骰子与三连6", () => {
   const s = createLudo();
@@ -54,5 +58,39 @@ test("跳棋星盘121孔、双方10子、连跳不吃子", () => {
   expect(n.board.filter((x) => x === 1).length).toBe(10);
   expect(n.board.filter((x) => x === 2).length).toBe(10);
   expect(n.turn).toBe(2);
+  expect(n.result).toBe(null);
   expect(moveCheckers(s, from, from)).toBe(null);
+});
+
+test("跳棋支持2/3/4/6人，玩家1在下方并按人数轮转", () => {
+  const averageR = (camp: number) =>
+    CHECKER_CAMPS[camp].reduce((sum, i) => sum + CHECKER_HOLES[i].r, 0) /
+    CHECKER_CAMPS[camp].length;
+  expect(averageR(3)).toBeGreaterThan(averageR(0));
+  expect(oppositeCheckerCamp(3)).toBe(0);
+  expect(oppositeCheckerCamp(5)).toBe(2);
+  expect(oppositeCheckerCamp(4)).toBe(1);
+  expect(isCheckerPlayers(4)).toBe(true);
+  expect(isCheckerPlayers(5)).toBe(false);
+
+  for (const players of CHECKER_PLAYER_COUNTS) {
+    const start = createCheckers(players);
+    expect(start.players).toBe(players);
+    expect(checkerCampIndices(players)[0]).toBe(3);
+    for (let player = 1; player <= players; player++)
+      expect(start.board.filter((piece) => piece === player).length).toBe(10);
+
+    let state = start;
+    for (let player = 1; player <= players; player++) {
+      expect(state.turn).toBe(player);
+      const from = state.board.findIndex(
+        (piece, i) => piece === player && checkerMoves(state, i).length > 0,
+      );
+      expect(from).toBeGreaterThanOrEqual(0);
+      const to = checkerMoves(state, from)[0];
+      state = moveCheckers(state, from, to)!;
+    }
+    expect(state.turn).toBe(1);
+    expect(state.ply).toBe(players);
+  }
 });

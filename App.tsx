@@ -18,6 +18,7 @@ import { GuideStrip, Academy } from "./components/Guide";
 import { GAMES } from "./lib/catalog";
 import { findTimeControl } from "./lib/clock";
 import type { ExtraKind } from "./lib/multigame";
+import { isCheckerPlayers, type CheckerPlayers } from "./lib/race";
 import { Board } from "./components/Board";
 import { GoGame, type GoFinish } from "./components/GoGame";
 import { HelpPanel } from "./components/Help";
@@ -211,6 +212,7 @@ function App() {
 
   const kind = signal<GameKind>("gomoku");
   const goSize = signal<GoSize>(DEFAULT_GO_SIZE);
+  const checkerPlayers = signal<CheckerPlayers>(2);
   const timeControl = signal("");
   const goInitial = signal<SavedGame | null>(null);
 
@@ -654,6 +656,7 @@ function App() {
       soundOn: soundOn(),
       kind: kind(),
       goSize: goSize(),
+      checkerPlayers: checkerPlayers(),
       timeControl: timeControl(),
     });
   }
@@ -686,6 +689,8 @@ function App() {
         mode.set(game.mode);
         level.set(game.level);
         limitOn.set(game.limitOn);
+        if (game.kind === "checkers")
+          checkerPlayers.set(game.checkerPlayers ?? 2);
         timeControl.set(game.timeControl ?? "");
         screen.set("extra");
       });
@@ -719,7 +724,7 @@ function App() {
       round.update((n) => n + 1);
       board.set(boardFromMoves(game.moves));
       moves.set(game.moves);
-      turn.set(savedTurn(game));
+      turn.set(savedTurn(game) as Player);
       over.set(null);
       mode.set(game.mode);
       level.set(game.level);
@@ -955,6 +960,9 @@ function App() {
             if (GO_SIZES.includes(meta.goSize as GoSize)) {
               goSize.set(meta.goSize as GoSize);
             }
+            if (isCheckerPlayers(meta.checkerPlayers)) {
+              checkerPlayers.set(meta.checkerPlayers);
+            }
           } catch {
             /* 存档损坏时忽略设置，沿用默认值 */
           }
@@ -965,6 +973,9 @@ function App() {
             level.set(game.level);
             limitOn.set(game.limitOn);
             if (game.goSize) goSize.set(game.goSize);
+            if (game.kind === "checkers") {
+              checkerPlayers.set(game.checkerPlayers ?? 2);
+            }
           }
           records.set(savedRecords);
           study.set(savedStudy);
@@ -991,6 +1002,7 @@ function App() {
     const so = soundOn();
     const kd = kind();
     const gs = goSize();
+    const cp = checkerPlayers();
     const tc = timeControl();
     if (!loaded()) return;
     Storage.setItem(
@@ -1003,6 +1015,7 @@ function App() {
         soundOn: so,
         kind: kd,
         goSize: gs,
+        checkerPlayers: cp,
         timeControl: tc,
       }),
     ).catch(() => {});
@@ -1287,6 +1300,7 @@ function App() {
             saved={savedGame()}
             kind={kind()}
             goSize={goSize()}
+            checkerPlayers={checkerPlayers()}
             timeControl={findTimeControl(kind(), timeControl()).id}
             onTimeControl={(id) => timeControl.set(id)}
             score={progress().score}
@@ -1311,6 +1325,7 @@ function App() {
             onLevel={(l) => level.set(l)}
             onLimit={(on) => limitOn.set(on)}
             onGoSize={(s) => goSize.set(s)}
+            onCheckerPlayers={(n) => checkerPlayers.set(n)}
             onSound={toggleSound}
             onHelp={() => helpOpen.set(true)}
             onExit={exitGame}
@@ -1669,6 +1684,7 @@ function App() {
             level={level()}
             limitOn={limitOn()}
             timeControl={timeControl()}
+            checkerPlayers={checkerPlayers()}
             helpOpen={helpOpen()}
             onSnapshot={handleGoSnapshot}
             onFinish={(f) => handleGoFinish(f, kind())}

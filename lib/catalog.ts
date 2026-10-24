@@ -96,7 +96,7 @@ export const GAMES: readonly GameMeta[] = [
     glyph: "跳",
     desc: "连跳过河，占满对营",
     family: "race",
-    players: "1–2 人",
+    players: "2 / 3 / 4 / 6 人",
     board: "121 孔星盘",
     modes: ["pve", "pvp", "aiai"],
     clock: "每回合 30 秒",

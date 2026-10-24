@@ -147,6 +147,7 @@ export function MenuPanel(props: {
         alignItems: "center",
         justifyContent: "center",
         padding: 16,
+        zIndex: 20,
       }}
     >
       <View

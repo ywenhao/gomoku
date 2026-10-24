@@ -26,6 +26,7 @@ import { widthOf, heightOf, owner, squareName } from "../lib/royal";
 import {
   CHECKER_HOLES,
   CHECKER_CAMPS,
+  checkerCampIndices,
   LUDO_TRACK,
   ludoPosition,
   ludoLegal,
@@ -47,7 +48,14 @@ const BLACK_PIECES = [
   blackQueen,
   blackKing,
 ];
-export const PLAYER_COLORS = ["#c0442c", "#366dba", "#428957", "#b18011"];
+export const PLAYER_COLORS = [
+  "#c0442c",
+  "#366dba",
+  "#428957",
+  "#b18011",
+  "#7a4b9f",
+  "#2f7f86",
+];
 const chessGlyphs = ["", "♙", "♘", "♗", "♖", "♕", "♔"],
   blackGlyphs = ["", "♟", "♞", "♝", "♜", "♛", "♚"];
 const redXq = ["", "兵", "马", "相", "车", "炮", "帅", "仕"],
@@ -64,6 +72,14 @@ export function MultiBoard(props: {
   disabled?: boolean;
 }) {
   const m = props.match();
+  const checkerCampColor = (i: number) => {
+    const state = props.match();
+    if (state.kind !== "checkers") return "#a48b6b";
+    const ownerIndex = checkerCampIndices(state.state.players).findIndex(
+      (camp) => CHECKER_CAMPS[camp].includes(i),
+    );
+    return ownerIndex < 0 ? "#a48b6b" : PLAYER_COLORS[ownerIndex];
+  };
   if (m.kind === "connect6")
     return (
       <Board
@@ -145,11 +161,7 @@ export function MultiBoard(props: {
                   borderColor:
                     props.selected() === i()
                       ? C.accent
-                      : CHECKER_CAMPS[0].includes(i())
-                        ? PLAYER_COLORS[0]
-                        : CHECKER_CAMPS[3].includes(i())
-                          ? PLAYER_COLORS[1]
-                          : "#a48b6b",
+                      : checkerCampColor(i()),
                 }}
               />
             );
@@ -341,7 +353,10 @@ export function MultiBoard(props: {
       cx.stroke();
       cx.fillStyle = "#8f7654";
       cx.font = `${c * 0.4}px sans-serif`;
-      cx.fillText("楚河       汉界", c * 2, c * 5.2);
+      cx.textAlign = "center";
+      cx.textBaseline = "middle";
+      cx.fillText("楚 河", c * 2.5, c * 5);
+      cx.fillText("汉 界", c * 6.5, c * 5);
     } else if (m.kind === "junqi") {
       cx.beginPath();
       for (let y = 0; y < 12; y++)
@@ -464,9 +479,9 @@ export function MultiBoard(props: {
             >
               <View
                 style={{
-                  width: cell() * 0.78,
-                  height: cell() * 0.78,
-                  borderRadius: m.kind === "junqi" ? 6 : cell() * 0.39,
+                  width: cell() * (m.kind === "junqi" ? 0.44 : 0.78),
+                  height: cell() * (m.kind === "junqi" ? 0.44 : 0.78),
+                  borderRadius: m.kind === "junqi" ? 3 : cell() * 0.39,
                   backgroundColor:
                     v() && m.kind !== "chess" ? "#fceccf" : "transparent",
                   borderWidth: v() && m.kind !== "chess" ? 1.5 : 0,
@@ -480,7 +495,13 @@ export function MultiBoard(props: {
                   else={
                     <Text
                       style={{
-                        fontSize: cell() * (m.kind === "chess" ? 0.78 : 0.47),
+                        fontSize:
+                          cell() *
+                          (m.kind === "chess"
+                            ? 0.78
+                            : m.kind === "junqi"
+                              ? 0.24
+                              : 0.47),
                         fontWeight: "700",
                         color:
                           m.kind === "chess"

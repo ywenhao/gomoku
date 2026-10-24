@@ -1,4 +1,4 @@
-import type { Difficulty, Player } from "./gomoku";
+import type { Difficulty } from "./gomoku";
 
 export interface RaceResult {
   winner: number;
@@ -196,15 +196,43 @@ const DIRS = [
 ];
 export interface CheckerState {
   board: number[];
-  turn: Player;
+  players: CheckerPlayers;
+  turn: number;
   result: RaceResult | null;
   ply: number;
 }
-export function createCheckers(): CheckerState {
+
+export const CHECKER_PLAYER_COUNTS = [2, 3, 4, 6] as const;
+export type CheckerPlayers = (typeof CHECKER_PLAYER_COUNTS)[number];
+
+export function isCheckerPlayers(value: unknown): value is CheckerPlayers {
+  return CHECKER_PLAYER_COUNTS.includes(value as CheckerPlayers);
+}
+
+/**
+ * 玩家 1 固定坐下方，其余玩家按逆时针顺序落座。四人局与标准六人局
+ * 使用相同营地，只空出一对相对营地。
+ */
+export function checkerCampIndices(
+  players: CheckerPlayers,
+): readonly number[] {
+  if (players === 2) return [3, 0];
+  if (players === 3) return [3, 5, 1];
+  if (players === 4) return [3, 5, 0, 2];
+  return [3, 4, 5, 0, 1, 2];
+}
+
+/** 营地对面对应关系：0↔3、1↔4、2↔5。 */
+const OPPOSITE_CHECKER_CAMP = [3, 4, 5, 0, 1, 2] as const;
+export const oppositeCheckerCamp = (camp: number): number =>
+  OPPOSITE_CHECKER_CAMP[camp];
+
+export function createCheckers(players: CheckerPlayers = 2): CheckerState {
   const board = new Array<number>(121).fill(0);
-  for (const i of camps[0]) board[i] = 1;
-  for (const i of camps[3]) board[i] = 2;
-  return { board, turn: 1, result: null, ply: 0 };
+  checkerCampIndices(players).forEach((camp, player) => {
+    for (const i of camps[camp]) board[i] = player + 1;
+  });
+  return { board, players, turn: 1, result: null, ply: 0 };
 }
 export function checkerMoves(s: CheckerState, from: number): number[] {
   if (s.result || s.board[from] !== s.turn || !holes[from]) return [];
@@ -212,7 +240,8 @@ export function checkerMoves(s: CheckerState, from: number): number[] {
     seen = new Set([from]),
     queue = [from];
   const occupied = (i: number) => i !== from && s.board[i] !== 0;
-  const target = camps[s.turn === 1 ? 3 : 0];
+  const startCamp = checkerCampIndices(s.players)[s.turn - 1];
+  const target = camps[oppositeCheckerCamp(startCamp)];
   for (const [dq, dr] of DIRS) {
     const i = index.get(key(holes[from].q + dq, holes[from].r + dr));
     if (i !== undefined && !occupied(i)) found.add(i);
@@ -253,13 +282,18 @@ export function moveCheckers(
   const board = s.board.slice();
   board[from] = 0;
   board[to] = s.turn;
-  const target = camps[s.turn === 1 ? 3 : 0];
-  const won =
-    target.every((i) => board[i] !== 0) &&
-    target.some((i) => board[i] === s.turn);
+  const startCamp = checkerCampIndices(s.players)[s.turn - 1],
+    target = camps[oppositeCheckerCamp(startCamp)];
+  const filled = target.every((i) => board[i] !== 0),
+    allMine = target.every((i) => board[i] === s.turn),
+    // 双人局保留“对营已满但被对方棋子堵住”的旧约定；多人局必须全部到达。
+    won =
+      allMine ||
+      (s.players === 2 && filled && target.some((i) => board[i] === s.turn));
   return {
     board,
-    turn: s.turn === 1 ? 2 : 1,
+    players: s.players,
+    turn: s.turn === s.players ? 1 : s.turn + 1,
     ply: s.ply + 1,
     result: won ? { winner: s.turn, reason: "占满对营（含防堵塞判定）" } : null,
   };
@@ -269,19 +303,30 @@ export function checkersAi(
   level: Difficulty,
 ): { from: number; to: number } | null {
   const all: { from: number; to: number; score: number }[] = [];
+  const target = camps[
+    oppositeCheckerCamp(checkerCampIndices(s.players)[s.turn - 1])
+  ];
+  const center = target.reduce(
+    (sum, i) => [
+      sum[0] + holes[i].q / target.length,
+      sum[1] + holes[i].r / target.length,
+    ],
+    [0, 0],
+  );
+  const distance = (i: number) => {
+    const dq = holes[i].q - center[0],
+      dr = holes[i].r - center[1];
+    return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
+  };
   for (let from = 0; from < 121; from++)
     if (s.board[from] === s.turn)
       for (const to of checkerMoves(s, from)) {
-        const dir = s.turn === 1 ? 1 : -1,
-          a = holes[from],
-          b = holes[to];
         all.push({
           from,
           to,
           score:
-            (b.r - a.r) * dir * 10 -
-            Math.abs(b.q + b.r / 2) * 0.2 +
-            (camps[s.turn === 1 ? 3 : 0].includes(to) ? 4 : 0),
+            (distance(from) - distance(to)) * 10 +
+            (target.includes(to) ? 4 : 0),
         });
       }
   if (!all.length) return null;

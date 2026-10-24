@@ -18,7 +18,6 @@ import {
   type GameKind,
   type Mode,
   type Move,
-  type Player,
 } from "./gomoku";
 import {
   GO_SIZES,
@@ -29,8 +28,14 @@ import {
 } from "./go";
 import { MOVE_SECONDS } from "./score";
 import { GAMES, isComplexGame } from "./catalog";
-import { replayMatch, type Action, type ExtraKind } from "./multigame";
+import {
+  clockSlotForMatch,
+  replayMatch,
+  type Action,
+  type ExtraKind,
+} from "./multigame";
 import { restoreClock, type MatchClock } from "./clock";
+import { isCheckerPlayers, type CheckerPlayers } from "./race";
 
 export interface SavedGame {
   kind: GameKind;
@@ -48,6 +53,7 @@ export interface SavedGame {
   savedAt: number;
   actions?: Action[];
   initialBoard?: number[];
+  checkerPlayers?: CheckerPlayers;
   clock?: MatchClock;
   timeControl?: string;
   scoring?: boolean;
@@ -76,13 +82,16 @@ function time(value: unknown, fallback: number): number {
 }
 
 /** 存档里下一手轮到谁：黑白交替，由最后一手反推。 */
-export function savedTurn(game: SavedGame): Player {
+export function savedTurn(game: SavedGame): number {
   if (game.actions)
-    return Math.min(
-      2,
-      replayMatch(game.kind as ExtraKind, game.actions, game.initialBoard)
-        ?.state.turn ?? 1,
-    ) as Player;
+    return (
+      replayMatch(
+        game.kind as ExtraKind,
+        game.actions,
+        game.initialBoard,
+        game.checkerPlayers ?? 2,
+      )?.state.turn ?? 1
+    );
   const last =
     game.kind === "go"
       ? game.goMoves?.[game.goMoves.length - 1]
@@ -149,19 +158,29 @@ export function readSavedGame(raw: string | null): SavedGame | null {
     if (!Array.isArray(data.actions) || data.actions.length > 4000) return null;
     const initialBoard = data.initialBoard as number[] | undefined;
     if (initialBoard !== undefined && !Array.isArray(initialBoard)) return null;
-    const match = replayMatch(kind, data.actions as Action[], initialBoard);
-    if (!match || match.state.result) return null;
-    const clock = restoreClock(
+    if (kind === "checkers" && data.checkerPlayers !== undefined)
+      if (!isCheckerPlayers(data.checkerPlayers)) return null;
+    const checkerPlayers: CheckerPlayers | undefined =
+      kind === "checkers"
+        ? isCheckerPlayers(data.checkerPlayers)
+          ? data.checkerPlayers
+          : 2
+        : undefined;
+    const match = replayMatch(
       kind,
-      data.clock,
-      Math.min(2, match.state.turn) as Player,
+      data.actions as Action[],
+      initialBoard,
+      checkerPlayers,
     );
+    if (!match || match.state.result) return null;
+    const clock = restoreClock(kind, data.clock, clockSlotForMatch(match));
     if (data.clock && !clock) return null;
     return {
       ...common,
       moves: [],
       actions: data.actions as Action[],
       initialBoard,
+      checkerPlayers,
       clock: clock ?? undefined,
       timeControl: clock?.control.id,
     };

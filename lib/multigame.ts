@@ -1,4 +1,4 @@
-import { type GameKind, type Difficulty } from "./gomoku";
+import { type GameKind, type Difficulty, type Player } from "./gomoku";
 import {
   createConnect6,
   playConnect6,
@@ -14,6 +14,7 @@ import {
   createCheckers,
   moveCheckers,
   checkersAi,
+  type CheckerPlayers,
   type LudoState,
   type CheckerState,
 } from "./race";
@@ -41,6 +42,18 @@ export type Match =
   | { kind: "checkers"; state: CheckerState }
   | { kind: "junqi"; state: JunqiState };
 
+/**
+ * 棋钟只有两个计时槽。跳棋按半回合奇偶使用槽位，其余棋种按行棋方映射。
+ * 多人跳棋每回合都是 30 秒，因此第 1、3、5 位玩家共用 p1 槽，第 2、4、6 位共用 p2 槽。
+ */
+export function clockSlotForMatch(m: Match): Player {
+  return (m.kind === "checkers"
+    ? m.state.ply % 2 === 0
+      ? 1
+      : 2
+    : Math.min(2, m.state.turn)) as Player;
+}
+
 export function completesTurn(
   before: Match,
   after: Match,
@@ -51,10 +64,14 @@ export function completesTurn(
     (before.kind === "ludo" && !action.roll)
   );
 }
-export function createMatch(kind: ExtraKind): Match {
+export function createMatch(
+  kind: ExtraKind,
+  checkerPlayers: CheckerPlayers = 2,
+): Match {
   if (kind === "connect6") return { kind, state: createConnect6() };
   if (kind === "ludo") return { kind, state: createLudo() };
-  if (kind === "checkers") return { kind, state: createCheckers() };
+  if (kind === "checkers")
+    return { kind, state: createCheckers(checkerPlayers) };
   if (kind === "junqi") return { kind, state: createJunqi() };
   return { kind, state: createRoyal(kind) };
 }
@@ -106,9 +123,10 @@ export function replayMatch(
   kind: ExtraKind,
   actions: readonly Action[],
   initialBoard?: number[],
+  checkerPlayers: CheckerPlayers = 2,
 ): Match | null {
   if (actions.length > 4000) return null;
-  let m = createMatch(kind);
+  let m = createMatch(kind, checkerPlayers);
   if (initialBoard) {
     if (
       kind !== "junqi" ||
