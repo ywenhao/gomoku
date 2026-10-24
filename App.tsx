@@ -44,7 +44,7 @@ import {
   type Move,
   type Player,
 } from "./lib/gomoku";
-import type { GoSize } from "./lib/go";
+import { DEFAULT_GO_SIZE, type GoSize } from "./lib/go";
 import { readSavedGame, savedTurn, type SavedGame } from "./lib/save";
 import {
   HISTORY_LIMIT,
@@ -81,7 +81,7 @@ const NO_LINE: number[] = [];
 const RESUME_FLOOR_MS = 3000;
 /** 对局进行中定期刷新剩余时间，降低被直接杀掉时的损失 */
 const GAME_SAVE_MS = 5000;
-/** 人机大战每手间隔，约 2 秒 */
+/** AI 观战每手间隔，约 2 秒 */
 const AIAI_DELAY_MS = 2000;
 /** 回放每手间隔 */
 const REPLAY_MS = 620;
@@ -97,7 +97,7 @@ type Screen =
   | "learn"
   | "records";
 
-/** 本地对局（人机 / 双人 / 人机大战）：菜单打开时暂停倒计时。 */
+/** 本地对局（对战 AI / 双人 / AI 观战）：菜单打开时暂停倒计时。 */
 const LOCAL_MODES: readonly Mode[] = ["pve", "pvp", "aiai"];
 
 /** 最后几秒进入红色闪烁警告，并逐秒滴答。 */
@@ -204,13 +204,13 @@ function App() {
   const round = signal(0);
   const boardSize = signal(0);
 
-  /** 人机大战：暂停、逐步回看与整局回放 */
+  /** AI 观战：暂停、逐步回看与整局回放 */
   const paused = signal(false);
   const reviewAt = signal<number | null>(null);
   const replaying = signal(false);
 
   const kind = signal<GameKind>("gomoku");
-  const goSize = signal<GoSize>(9);
+  const goSize = signal<GoSize>(DEFAULT_GO_SIZE);
   const timeControl = signal("");
   const goInitial = signal<SavedGame | null>(null);
 
@@ -288,7 +288,7 @@ function App() {
       (mode() === "pvp" || turn() === HUMAN),
   );
 
-  /** 是否该给人倒计时（AI 回合、人机大战、终局、回看、关闭限时都不计时） */
+  /** 是否该给人倒计时（AI 回合、AI 观战、终局、回看、关闭限时都不计时） */
   const timed = computed(
     () =>
       screen() === "game" &&
@@ -324,7 +324,7 @@ function App() {
       return o.winner === 1 ? "黑棋获胜" : "白棋获胜";
     }
     if (mode() === "aiai") {
-      if (paused()) return "人机大战已暂停";
+      if (paused()) return "AI 观战已暂停";
       if (thinking()) return "AI 思考中…";
       return turn() === 1 ? "黑方 AI 落子" : "白方 AI 落子";
     }
@@ -437,7 +437,7 @@ function App() {
       paused.set(true);
     });
 
-    // 双人局没有「我方」：任意一方连成五子都是赢棋；只有人机输给 AI 才放落败音
+    // 双人局没有「我方」：任意一方连成五子都是赢棋；只有对战 AI输给 AI 才放落败音
     playSound(
       r.kind === "draw"
         ? "draw"
@@ -694,7 +694,7 @@ function App() {
     if (game.kind === "go") {
       batch(() => {
         kind.set("go");
-        goSize.set(game.goSize ?? 9);
+        goSize.set(game.goSize ?? DEFAULT_GO_SIZE);
         goInitial.set(game);
         mode.set(game.mode);
         level.set(game.level);
@@ -1142,7 +1142,7 @@ function App() {
     return () => clearInterval(timer);
   });
 
-  // AI 落子：人机模式执白；人机大战双方都由 AI 走，约 2 秒一手。
+  // AI 落子：对战 AI模式执白；AI 观战双方都由 AI 走，约 2 秒一手。
   effect(() => {
     const r = round();
     const m = mode();
@@ -1222,7 +1222,7 @@ function App() {
     return () => clearTimeout(timer);
   });
 
-  // 人机大战整局回放：每 620ms 前进一手，到末尾自动停。
+  // AI 观战整局回放：每 620ms 前进一手，到末尾自动停。
   effect(() => {
     if (!replaying()) return;
     const timer = setInterval(() => {
@@ -1366,9 +1366,9 @@ function App() {
                   }}
                 >
                   {mode() === "pve"
-                    ? `人机 · ${LEVEL_NAME[level()]}`
+                    ? `对战 AI · ${LEVEL_NAME[level()]}`
                     : mode() === "aiai"
-                      ? `人机大战 · ${LEVEL_NAME[level()]}`
+                      ? `AI 观战 · ${LEVEL_NAME[level()]}`
                       : "本地双人"}{" "}
                   · 15 × 15
                 </Text>
@@ -1754,7 +1754,12 @@ function App() {
       </View>
 
       {/* 音效播放器（隐藏） */}
-      <SoundBank srcs={soundSrc} triggers={sounds} prime={soundPrime} />
+      <SoundBank
+        srcs={soundSrc}
+        triggers={sounds}
+        prime={soundPrime}
+        enabled={soundOn}
+      />
 
       {/* 菜单 */}
       <If when={screen() === "game" && menu()}>

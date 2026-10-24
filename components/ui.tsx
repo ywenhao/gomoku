@@ -21,6 +21,7 @@ export function PressButton(props: {
   hint?: string;
   subLabel?: string;
   testID?: string;
+  size?: "default" | "large";
 }) {
   const primary = props.tone === "primary";
   return (
@@ -35,7 +36,7 @@ export function PressButton(props: {
       style={{
         flexGrow: props.grow ? 1 : 0,
         flexBasis: props.grow ? 0 : "auto",
-        paddingVertical: 11,
+        paddingVertical: props.size === "large" ? 16 : 11,
         paddingHorizontal: 18,
         borderRadius: 12,
         backgroundColor: primary ? C.ink : C.panel,
@@ -52,8 +53,8 @@ export function PressButton(props: {
     >
       <Text
         style={{
-          fontSize: 15,
-          fontWeight: "600",
+          fontSize: props.size === "large" ? 18 : 15,
+          fontWeight: props.size === "large" ? "700" : "600",
           color: primary ? "#fdfaf3" : C.ink,
         }}
       >

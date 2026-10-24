@@ -1,7 +1,7 @@
 import { Scroll, Text, View, computed, effect, signal, untracked } from "nsh";
 import { MultiBoard } from "./MultiBoard";
 import { replayMatch, createMatch, type ExtraKind } from "../lib/multigame";
-import { gameMeta, gameName } from "../lib/catalog";
+import { MODE_LABELS, gameMeta, gameName } from "../lib/catalog";
 import { Board } from "./Board";
 import { C, ConfirmButton, PressButton } from "./ui";
 import { recordMoveCount, type StoredRecord } from "../lib/records";
@@ -17,9 +17,9 @@ const LEVEL_NAME: Record<Difficulty, string> = {
 };
 
 const MODE_NAME = {
-  pve: "人机",
+  pve: MODE_LABELS.pve,
   pvp: "本地双人",
-  aiai: "人机大战",
+  aiai: MODE_LABELS.aiai,
 } as const;
 
 function Header(props: {
@@ -233,21 +233,34 @@ function RecordView(props: {
             第 {step()} / {total} 步 · {gameName(props.record.game)} ·
             复盘公开双方棋子
           </Text>
-          <MultiBoard
-            match={() =>
-              replayMatch(
-                props.record.game as ExtraKind,
-                props.record.actions!.slice(0, step()),
-                props.record.initialBoard,
-              ) ?? createMatch(props.record.game as ExtraKind)
+          <If
+            when={
+              props.record.game !== "junqi" ||
+              props.record.mode === "aiai" ||
+              props.record.result !== undefined
             }
-            size={() => boardSize() || 340}
-            selected={() => -1}
-            targets={() => []}
-            onCell={() => {}}
-            disabled
-            reveal
-          />
+            else={
+              <Text testID="record-junqi-hidden" style={{ color: C.muted }}>
+                未结束的军棋棋谱暂不公开，避免泄露暗子。
+              </Text>
+            }
+          >
+            <MultiBoard
+              match={() =>
+                replayMatch(
+                  props.record.game as ExtraKind,
+                  props.record.actions!.slice(0, step()),
+                  props.record.initialBoard,
+                ) ?? createMatch(props.record.game as ExtraKind)
+              }
+              size={() => boardSize() || 340}
+              selected={() => -1}
+              targets={() => []}
+              onCell={() => {}}
+              disabled
+              reveal
+            />
+          </If>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             <PressButton
               label="第一手"
@@ -507,7 +520,8 @@ export function Records(props: {
                 marginBottom: 10,
               }}
             >
-              对局菜单和人机大战控制栏都能保存棋谱。保存的是完整手顺，可以逐步回看、自动播放，
+              对局菜单和AI
+              观战控制栏都能保存棋谱。保存的是完整手顺，可以逐步回看、自动播放，
               也可以在这里删除。棋谱与「继续游戏」互不影响。
             </Text>
 

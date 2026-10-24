@@ -1,4 +1,4 @@
-import { gameName } from "../lib/catalog";
+import { MODE_LABELS, gameName } from "../lib/catalog";
 import { Scroll, Text, View, effect, signal } from "nsh";
 import { windowSize } from "nsh/device";
 import { C, ConfirmButton, PressButton, Segmented } from "./ui";
@@ -7,9 +7,9 @@ import type { Difficulty, GameKind, Mode } from "../lib/gomoku";
 import type { GoSize } from "../lib/go";
 
 const MODES: readonly { key: Mode; label: string }[] = [
-  { key: "pve", label: "人机" },
+  { key: "pve", label: MODE_LABELS.pve },
   { key: "pvp", label: "双人" },
-  { key: "aiai", label: "人机大战" },
+  { key: "aiai", label: MODE_LABELS.aiai },
 ];
 
 const LEVELS: readonly { key: Difficulty; label: string }[] = [
@@ -86,7 +86,7 @@ const OUTCOME_COLOR: Record<string, string> = {
   draw: "#8d8173",
 };
 
-/** 对局菜单：设置、人机大战控制、保存棋谱、历史战绩。 */
+/** 对局菜单：设置、AI 观战控制、保存棋谱、历史战绩。 */
 export function MenuPanel(props: {
   kind: GameKind;
   score: number;
@@ -249,7 +249,7 @@ export function MenuPanel(props: {
         </Text>
 
         <If when={aiai}>
-          <SectionTitle text="人机大战" />
+          <SectionTitle text="AI 观战" />
           <View style={{ flexDirection: "row", gap: 8 }}>
             <PressButton
               label={props.paused ? "继续" : "暂停"}
@@ -490,7 +490,7 @@ export function MenuPanel(props: {
                       {item().mode === "pvp"
                         ? " · 双人"
                         : item().mode === "aiai"
-                          ? " · 人机大战"
+                          ? " · AI 观战"
                           : ""}
                     </Text>
                     <Text

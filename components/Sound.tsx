@@ -1,17 +1,6 @@
-import {
-  Video,
-  View,
-  effect,
-  signal,
-  type Accessor,
-  type YNode,
-} from "nsh";
+import { Video, View, effect, signal, type Accessor, type YNode } from "nsh";
 import { platform } from "nsh/device";
-import {
-  SOUND_NAMES,
-  SOUND_SECONDS,
-  type SoundName,
-} from "../lib/sound";
+import { SOUND_NAMES, SOUND_SECONDS, type SoundName } from "../lib/sound";
 
 /**
  * 一个音效播放器：用隐藏的 <Video> 播 WAV。
@@ -25,6 +14,7 @@ function SoundPlayer(props: {
   src: string;
   trigger: Accessor<number>;
   prime: Accessor<number>;
+  enabled: Accessor<boolean>;
 }) {
   const playing = signal(false);
   const muted = signal(false);
@@ -64,11 +54,21 @@ function SoundPlayer(props: {
     rewind();
     playing.set(true);
     // 某些平台（或静音的 WebView）不回调 onEnd，用时长兜底复位
-    watchdog = setTimeout(() => {
-      watchdog = undefined;
-      playing.set(false);
-    }, SOUND_SECONDS[props.name] * 1000 + 300);
+    watchdog = setTimeout(
+      () => {
+        watchdog = undefined;
+        playing.set(false);
+      },
+      SOUND_SECONDS[props.name] * 1000 + 300,
+    );
     return clearWatchdog;
+  });
+
+  effect(() => {
+    if (!props.enabled()) {
+      playing.set(false);
+      clearWatchdog();
+    }
   });
 
   // Web 的自动播放限制：把每个音效都在第一次用户触摸里静音播一次，
@@ -102,8 +102,8 @@ function SoundPlayer(props: {
         node = v;
       }}
       src={props.src}
-      paused={!playing()}
-      muted={muted()}
+      paused={!playing() || !props.enabled()}
+      muted={muted() || !props.enabled()}
       volume={1}
       controls={false}
       onEnd={() => playing.set(false)}
@@ -129,6 +129,7 @@ export function SoundBank(props: {
   srcs: Accessor<Partial<Record<SoundName, string>>>;
   triggers: Record<SoundName, Accessor<number>>;
   prime: Accessor<number>;
+  enabled: Accessor<boolean>;
 }) {
   return (
     <View
@@ -149,6 +150,7 @@ export function SoundBank(props: {
               src={props.srcs()[name()]!}
               trigger={props.triggers[name()]}
               prime={props.prime}
+              enabled={props.enabled}
             />
           </If>
         )}

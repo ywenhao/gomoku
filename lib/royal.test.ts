@@ -9,6 +9,7 @@ import {
   deadMaterial,
   drawClaim,
   timeoutRoyal,
+  parseSquare,
 } from "./royal";
 const move = (s: ReturnType<typeof createRoyal>, uci: string) =>
   playRoyal(s, parseUci(s, uci)!)!;
@@ -116,4 +117,13 @@ test("中国象棋限着无吃子计数不会被兵卒移动重置", () => {
   s = playRoyal(s, { from: 40, to: 49 })!;
   expect(s.halfmove).toBe(121);
   expect(drawClaim(s)).not.toBe(null);
+});
+
+test("拒绝非法吃过路兵、易位权、分数坐标与九宫外将帅", () => {
+  expect(parseSquare("e3.5", "chess")).toBe(-1);
+  expect(parseSquare("a01", "xiangqi")).toBe(-1);
+  expect(fromFen("chess", "k7/8/8/3rP3/8/8/8/4K3 w - d6 0 1")).toBe(null);
+  expect(fromFen("chess", "k7/8/8/3pP3/8/8/8/4K3 w - d4 0 1")).toBe(null);
+  expect(fromFen("chess", "k7/8/8/8/8/8/8/4K3 w K - 0 1")).toBe(null);
+  expect(fromFen("xiangqi", "k8/9/9/9/4p4/9/9/9/9/4K4 w - - 0 1")).toBe(null);
 });

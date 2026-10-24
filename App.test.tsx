@@ -1,6 +1,7 @@
 import { expect, open, test } from "nsh/test";
 
-const has = (texts: string[], part: string) => texts.some((t) => t.includes(part));
+const has = (texts: string[], part: string) =>
+  texts.some((t) => t.includes(part));
 
 /** 启动到主页，不自动开局 */
 const launch = (extra: Record<string, unknown> = {}) =>
@@ -26,7 +27,7 @@ test("首屏是游戏菜单，不直接显示棋盘", async () => {
   const app = await launch();
   const texts = app.texts();
   expect(texts).toContain("五子棋");
-  expect(has(texts, "人机")).toBe(true);
+  expect(has(texts, "对战 AI")).toBe(true);
   expect(has(texts, "普通")).toBe(true);
   expect(app.shows("id:home-screen")).toBe(true);
   expect(app.shows("id:home-new")).toBe(true);
@@ -42,7 +43,7 @@ test("新对局进入棋盘并开始倒计时", async () => {
   const texts = app.texts();
   expect(texts).toContain("轮到你落子");
   expect(has(texts, "0 手")).toBe(true);
-  expect(has(texts, "人机 · 普通")).toBe(true);
+  expect(has(texts, "对战 AI · 普通")).toBe(true);
   expect(app.shows("id:cell-7-7")).toBe(true);
   expect(app.shows("id:cell-0-0")).toBe(true);
   expect(app.shows("id:cell-14-14")).toBe(true);
@@ -70,17 +71,7 @@ test("悔棋回到开局", async () => {
 test("双人对战五连判胜，结算浮层可重开", async () => {
   const app = await fresh();
   await toPvp(app);
-  const seq = [
-    "3-7",
-    "0-0",
-    "4-7",
-    "0-1",
-    "5-7",
-    "0-2",
-    "6-7",
-    "0-3",
-    "7-7",
-  ];
+  const seq = ["3-7", "0-0", "4-7", "0-1", "5-7", "0-2", "6-7", "0-3", "7-7"];
   for (const cell of seq) await app.press(`id:cell-${cell}`);
 
   const texts = app.texts();
@@ -97,7 +88,17 @@ test("双人对战五连判胜，结算浮层可重开", async () => {
 test("结算浮层可以收起，棋盘保留终局", async () => {
   const app = await fresh();
   await toPvp(app);
-  for (const c of ["3-7", "0-0", "4-7", "0-1", "5-7", "0-2", "6-7", "0-3", "7-7"]) {
+  for (const c of [
+    "3-7",
+    "0-0",
+    "4-7",
+    "0-1",
+    "5-7",
+    "0-2",
+    "6-7",
+    "0-3",
+    "7-7",
+  ]) {
     await app.press(`id:cell-${c}`);
   }
   await app.press("id:result-close");
@@ -125,7 +126,7 @@ test("切换难度不会清空棋局", async () => {
   await app.press("id:menu-close");
   await app.waitUntil(() => !app.shows("id:menu-close"));
   expect(has(app.texts(), "2 手")).toBe(true);
-  expect(has(app.texts(), "人机 · 困难")).toBe(true);
+  expect(has(app.texts(), "对战 AI · 困难")).toBe(true);
 });
 
 test("底部重新开始清空棋盘", async () => {
@@ -160,7 +161,17 @@ test("连续多局状态互不影响", async () => {
   const app = await fresh();
   await toPvp(app);
   for (let round = 0; round < 3; round++) {
-    for (const c of ["1-1", "9-9", "2-2", "9-10", "3-3", "9-11", "4-4", "9-12", "5-5"]) {
+    for (const c of [
+      "1-1",
+      "9-9",
+      "2-2",
+      "9-10",
+      "3-3",
+      "9-11",
+      "4-4",
+      "9-12",
+      "5-5",
+    ]) {
       await app.press(`id:cell-${c}`);
     }
     expect(app.shows("id:stone-5-5-b")).toBe(true);
@@ -174,7 +185,7 @@ test("连续多局状态互不影响", async () => {
   expect(saved.history.length).toBe(3);
 });
 
-test("人机模式悔棋两步后轮到玩家", async () => {
+test("对战 AI模式悔棋两步后轮到玩家", async () => {
   const app = await fresh();
   await app.press("id:cell-7-7");
   await app.waitUntil(() => has(app.texts(), "2 手"), { timeout: 8000 });
@@ -205,7 +216,17 @@ test("菜单可以打开、显示统计并关闭", async () => {
 test("对局结束会写入战绩，清空后归零", async () => {
   const app = await fresh();
   await toPvp(app);
-  for (const c of ["3-7", "0-0", "4-7", "0-1", "5-7", "0-2", "6-7", "0-3", "7-7"]) {
+  for (const c of [
+    "3-7",
+    "0-0",
+    "4-7",
+    "0-1",
+    "5-7",
+    "0-2",
+    "6-7",
+    "0-3",
+    "7-7",
+  ]) {
     await app.press(`id:cell-${c}`);
   }
   await app.press("id:result-restart");
@@ -382,7 +403,7 @@ test("地狱难度会用于新对局并写入设置", async () => {
   await app.press("id:seg-hell");
   await app.press("id:home-new");
   await app.waitFor("id:cell-7-7");
-  expect(has(app.texts(), "人机 · 地狱")).toBe(true);
+  expect(has(app.texts(), "对战 AI · 地狱")).toBe(true);
   await app.waitUntil(() => {
     const raw = app.storage()["gomoku.v2"];
     return raw !== undefined && JSON.parse(raw).level === "hell";
@@ -395,7 +416,7 @@ test("主页的对战设置会用于新对局", async () => {
   await app.press("id:seg-off");
   await app.press("id:home-new");
   await app.waitFor("id:cell-7-7");
-  expect(has(app.texts(), "人机 · 困难")).toBe(true);
+  expect(has(app.texts(), "对战 AI · 困难")).toBe(true);
   expect(app.shows("id:timer-text")).toBe(false);
 });
 

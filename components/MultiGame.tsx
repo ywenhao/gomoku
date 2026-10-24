@@ -17,6 +17,7 @@ import {
   applyAction,
   matchAi,
   replayMatch,
+  completesTurn,
   type Match,
   type Action,
   type ExtraKind,
@@ -35,6 +36,7 @@ import {
   restoreClock,
   tickClock,
   clockAfterMove,
+  clockAfterUndo,
   formatClock,
   clockUrgent,
   remainingMs,
@@ -46,6 +48,7 @@ import type { Difficulty, Mode, Player } from "../lib/gomoku";
 import type { SoundName } from "../lib/sound";
 import type { RecordInput } from "../lib/records";
 import type { GoFinish } from "./GoGame";
+import { outcomeForWinner } from "../lib/score";
 import { findTimeControl } from "../lib/clock";
 
 export function MultiGame(props: {
@@ -79,8 +82,12 @@ export function MultiGame(props: {
     review = signal<number | null>(null),
     replaying = signal(false),
     size = signal(340);
-  const setup = signal(props.kind === "junqi" && !initial ? 1 : 0),
-    handoff = signal(false),
+  const setup = signal(
+      props.kind === "junqi" && props.mode !== "aiai" && !initial ? 1 : 0,
+    ),
+    handoff = signal(
+      !!initial && props.kind === "junqi" && props.mode === "pvp",
+    ),
     drawOffer = signal(false);
   const started = signal(initial?.startedAt ?? Date.now()),
     undos = signal(initial?.undos ?? 0),
@@ -162,9 +169,9 @@ export function MultiGame(props: {
       state: { ...m.state, result: { winner, reason } },
     } as Match);
   }
-  function syncTime(): boolean {
+  function syncTime(now = Date.now()): boolean {
     if (!props.limitOn || props.mode === "aiai") return true;
-    const r = tickClock(clock(), Date.now());
+    const r = tickClock(clock(), now);
     clock.set(r.clock);
     if (r.timeout !== null && isComplexGame(props.kind)) {
       const m = match(),
@@ -181,22 +188,28 @@ export function MultiGame(props: {
     return true;
   }
   function commit(a: Action) {
-    if (match().state.result || !syncTime()) return;
+    const now = Date.now();
+    if (match().state.result || !syncTime(now)) return;
     const before = match(),
       next = applyAction(before, a);
     if (!next) return;
-    const endedTurn =
-      next.state.turn !== before.state.turn ||
-      (before.kind === "ludo" && !a.roll);
+    const endedTurn = completesTurn(before, next, a);
     let nextClock = clock();
     if (props.limitOn && props.mode !== "aiai") {
       if (control.kind === "per-move" && endedTurn)
         nextClock = {
-          ...createClock(control, Math.min(2, next.state.turn) as Player),
+          ...createClock(control, Math.min(2, next.state.turn) as Player, now),
           moveNo: nextClock.moveNo + 1,
         };
       else if (endedTurn)
-        nextClock = clockAfterMove(nextClock, nextClock.turn, Date.now()).clock;
+        nextClock = clockAfterMove(nextClock, nextClock.turn, now).clock;
+    } else {
+      nextClock = {
+        ...nextClock,
+        turn: Math.min(2, next.state.turn) as Player,
+        moveNo: nextClock.moveNo + (endedTurn ? 1 : 0),
+        lastAt: now,
+      };
     }
     batch(() => {
       clock.set(nextClock);
@@ -291,6 +304,14 @@ export function MultiGame(props: {
       props.mode === "aiai"
     )
       return;
+    const now = Date.now();
+    if (props.limitOn && !blocked() && !syncTime(now)) return;
+    if (
+      props.limitOn &&
+      control.kind === "per-move" &&
+      remainingMs(sideOf(clock(), clock().turn)) <= 0
+    )
+      return;
     let n = actions().length - 1;
     if (props.mode === "pve")
       while (
@@ -302,22 +323,53 @@ export function MultiGame(props: {
     const a = actions().slice(0, n),
       m = replayMatch(props.kind, a, initialBoard());
     if (!m) return;
+    const movers: Player[] = [];
+    let cursor = m;
+    for (const action of actions().slice(n)) {
+      const next = applyAction(cursor, action);
+      if (!next) return;
+      if (completesTurn(cursor, next, action))
+        movers.push(Math.min(2, cursor.state.turn) as Player);
+      cursor = next;
+    }
+    const rewound = props.limitOn
+      ? clockAfterUndo(
+          clock(),
+          movers,
+          Math.min(2, m.state.turn) as Player,
+          now,
+          !blocked(),
+        )
+      : {
+          clock: {
+            ...clock(),
+            turn: Math.min(2, m.state.turn) as Player,
+            moveNo: Math.max(0, clock().moveNo - movers.length),
+            lastAt: now,
+          },
+          timeout: null,
+        };
     batch(() => {
       match.set(m);
       actions.set(a);
       selected.set(-1);
       undos.update((v) => v + 1);
-      clock.update((c) => ({
-        ...c,
-        turn: Math.min(2, m.state.turn) as Player,
-        moveNo: Math.max(0, c.moveNo - 1),
-        lastAt: Date.now(),
-      }));
+      clock.set(rewound.clock);
     });
-    notice.set("已悔棋，累计棋钟不返还用时或已得加秒");
+    if (rewound.timeout !== null) {
+      const result =
+        m.kind === "chess" || m.kind === "xiangqi"
+          ? timeoutRoyal(m.state, rewound.timeout)
+          : { winner: rewound.timeout === 1 ? 2 : 1, reason: "超时判负" };
+      finish(result.winner, result.reason);
+    } else notice.set("已悔棋，撤回加秒与阶段加时，不返还已用时间");
   }
   function record() {
     const r = match().state.result;
+    if (props.kind === "junqi" && props.mode !== "aiai" && !r) {
+      notice.set("暗棋对局结束后才能保存公开棋谱");
+      return;
+    }
     props.onRecord({
       game: props.kind,
       mode: props.mode,
@@ -347,14 +399,7 @@ export function MultiGame(props: {
     );
     props.onFinish({
       result: `${r.winner ? `玩家${r.winner}胜` : "和棋"} · ${reason}`,
-      outcome:
-        props.mode === "pve"
-          ? r.winner === 1
-            ? "win"
-            : r.winner
-              ? "loss"
-              : "draw"
-          : "draw",
+      outcome: outcomeForWinner(r.winner),
       moves: actions().length,
       undos: undos(),
       timeouts: timeouts(),
@@ -509,8 +554,8 @@ export function MultiGame(props: {
               ? "四人轮流"
               : "本地双人"
             : props.mode === "aiai"
-              ? "AI观战"
-              : "人机对战"}{" "}
+              ? "AI 观战"
+              : "对战 AI"}{" "}
           · {props.limitOn ? control.label : "不限时"}
         </Text>
         <GuideStrip kind={props.kind} />
@@ -603,6 +648,11 @@ export function MultiGame(props: {
             <PressButton
               label="保存棋谱"
               testID="extra-save"
+              disabled={
+                props.kind === "junqi" &&
+                props.mode !== "aiai" &&
+                !match().state.result
+              }
               onPress={record}
             />
             <ConfirmButton
@@ -618,7 +668,9 @@ export function MultiGame(props: {
                   clock.set(createClock(control));
                   review.set(null);
                   replaying.set(false);
-                  setup.set(props.kind === "junqi" ? 1 : 0);
+                  setup.set(
+                    props.kind === "junqi" && props.mode !== "aiai" ? 1 : 0,
+                  );
                   handoff.set(false);
                   selected.set(-1);
                   menu.set(false);
@@ -662,7 +714,7 @@ export function MultiGame(props: {
                 onPlane={(i) => {
                   if (human()) commit({ plane: i });
                 }}
-                reveal={!!match().state.result}
+                reveal={props.mode === "aiai" || !!match().state.result}
               />
             </View>
           }
@@ -838,6 +890,11 @@ export function MultiGame(props: {
           <PressButton
             label="保存棋谱"
             testID="extra-record"
+            disabled={
+              props.kind === "junqi" &&
+              props.mode !== "aiai" &&
+              !match().state.result
+            }
             onPress={record}
           />
           <PressButton

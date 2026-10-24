@@ -40,6 +40,17 @@ export type Match =
   | { kind: "ludo"; state: LudoState }
   | { kind: "checkers"; state: CheckerState }
   | { kind: "junqi"; state: JunqiState };
+
+export function completesTurn(
+  before: Match,
+  after: Match,
+  action: Action,
+): boolean {
+  return (
+    before.state.turn !== after.state.turn ||
+    (before.kind === "ludo" && !action.roll)
+  );
+}
 export function createMatch(kind: ExtraKind): Match {
   if (kind === "connect6") return { kind, state: createConnect6() };
   if (kind === "ludo") return { kind, state: createLudo() };

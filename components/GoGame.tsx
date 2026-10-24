@@ -1,3 +1,4 @@
+import { MODE_LABELS } from "../lib/catalog";
 import {
   batch,
   computed,
@@ -14,6 +15,7 @@ import {
   restoreClock,
   findTimeControl,
   clockAfterMove,
+  clockAfterUndo,
   tickClock,
   formatClock,
   remainingMs,
@@ -39,6 +41,7 @@ import {
 import { fallbackGoMove, findGoMove } from "../lib/go-ai";
 import {
   MOVE_SECONDS,
+  outcomeForWinner,
   formatDuration,
   type GameRecord,
   type Outcome,
@@ -67,9 +70,9 @@ const LEVEL_NAME: Record<Difficulty, string> = {
 };
 
 const MODE_NAME: Record<Mode, string> = {
-  pve: "人机",
+  pve: MODE_LABELS.pve,
   pvp: "本地双人",
-  aiai: "人机大战",
+  aiai: MODE_LABELS.aiai,
 };
 
 /** 围棋对局。从 App 挂载时一次性初始化，之后自己管理棋盘与 AI。 */
@@ -247,7 +250,7 @@ export function GoGame(props: {
       return deadMode() ? "点击死子进行标记" : "数子阶段：确认死子后结算";
     }
     if (mode() === "aiai") {
-      if (paused()) return "人机大战已暂停";
+      if (paused()) return "AI 观战已暂停";
       if (thinking()) return "AI 思考中…";
       return turn() === 1 ? "黑方 AI 落子" : "白方 AI 落子";
     }
@@ -323,6 +326,7 @@ export function GoGame(props: {
   }
 
   function commit(x: number, y: number) {
+    const now = Date.now();
     const p = turn();
     if (board()[y * size() + x] !== 0) return;
     const r = playGo(board(), size(), x, y, p, ko());
@@ -340,7 +344,7 @@ export function GoGame(props: {
       flash("全局同形再现：请选择其他落点");
       return;
     }
-    if (!advanceClock(p)) return;
+    if (!advanceClock(p, now)) return;
     const at = moves().length;
     batch(() => {
       positions.update((v) => v.concat([r.board.join("")]));
@@ -403,19 +407,24 @@ export function GoGame(props: {
     });
     props.onFinish({
       result: goResultText(detail),
-      outcome: mode() === "pve" ? (p === 1 ? "loss" : "win") : "draw",
+      outcome: outcomeForWinner(detail.winner),
       moves: moves().length,
       undos: undos(),
       timeouts: timeouts(),
       seconds,
     });
   }
-  function advanceClock(p: Player): boolean {
+  function advanceClock(p: Player, now = Date.now()): boolean {
     if (!limitOn() || mode() === "aiai") {
-      clock.update((c) => ({ ...c, turn: goOther(p), lastAt: Date.now() }));
+      clock.update((c) => ({
+        ...c,
+        turn: goOther(p),
+        moveNo: c.moveNo + 1,
+        lastAt: now,
+      }));
       return true;
     }
-    const r = clockAfterMove(clock(), p, Date.now());
+    const r = clockAfterMove(clock(), p, now);
     clock.set(r.clock);
     if (r.timeout !== null) {
       timeoutLoss(r.timeout);
@@ -453,9 +462,24 @@ export function GoGame(props: {
     const last = list[list.length - 1];
     const drop = mode() === "pve" && last.p === 2 && list.length >= 2 ? 2 : 1;
     const kept = list.slice(0, Math.max(0, list.length - drop));
+    const now = Date.now(),
+      nextTurn = kept.length % 2 === 0 ? 1 : 2;
+    const rewound = clockAfterUndo(
+      clock(),
+      list.slice(kept.length).map((m) => m.p),
+      nextTurn,
+      now,
+      timed(),
+    );
+    if (rewound.timeout !== null) {
+      clock.set(rewound.clock);
+      timeoutLoss(rewound.timeout);
+      return;
+    }
     batch(() => {
       round.update((n) => n + 1);
       applyState(kept);
+      clock.set(rewound.clock);
       over.set(null);
       scoring.set(false);
       resultOpen.set(false);
@@ -500,14 +524,7 @@ export function GoGame(props: {
           1000,
       ),
     );
-    const outcome: Outcome =
-      mode() === "pve"
-        ? detail.winner === 1
-          ? "win"
-          : detail.winner === 2
-            ? "loss"
-            : "draw"
-        : "draw";
+    const outcome: Outcome = outcomeForWinner(detail.winner);
     batch(() => {
       scoring.set(false);
       paused.set(true);
@@ -670,7 +687,7 @@ export function GoGame(props: {
     return () => clearInterval(timer);
   });
 
-  // AI 落子：人机模式执白，人机大战双方都由 AI 走。
+  // AI 落子：对战 AI模式执白，AI 观战双方都由 AI 走。
   effect(() => {
     const md = mode();
     const t = turn();
@@ -710,7 +727,7 @@ export function GoGame(props: {
       if (untracked(() => menu())) return;
       if (untracked(() => props.helpOpen)) return;
 
-      // 人机大战下到很晚仍无胜负时，主动虚手结束，避免无限对局。
+      // AI 观战下到很晚仍无胜负时，主动虚手结束，避免无限对局。
       if (
         md === "aiai" &&
         untracked(() => moves().length) > size() * size() * 1.5
@@ -1379,7 +1396,7 @@ export function GoGame(props: {
             >
               {mode() === "pve"
                 ? "你执黑。中国规则数子，白棋贴 7.5 点（3¾子）。"
-                : "人机大战 / 本地双人不计积分，可保存棋谱反复回看。"}
+                : "AI 观战 / 本地双人不计积分，可保存棋谱反复回看。"}
             </Text>
             <View
               style={{

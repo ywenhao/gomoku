@@ -2,6 +2,7 @@ import { expect, test } from "nsh/test";
 import {
   TIME_CONTROLS,
   clockAfterMove,
+  clockAfterUndo,
   createClock,
   defaultTimeControl,
   findTimeControl,
@@ -125,4 +126,34 @@ test("格式化与紧迫提示", () => {
   const low = tickClock(start, 14 * 60_000 + 55_000).clock;
   expect(formatClock(low.p1, CHESS)).toBe("0:05");
   expect(isFlagDown(low.p1)).toBe(false);
+});
+
+test("跨过40步后的悔棋撤销双方加时，重走不会重复领取", () => {
+  let c = createClock(CLASSIC, 1, 0);
+  for (let i = 0; i < 80; i++)
+    c = clockAfterMove(c, c.turn, (i + 1) * 1000).clock;
+  const before = c;
+  const undone = clockAfterUndo(c, [1, 2], 1, 85000);
+  expect(undone.timeout).toBe(null);
+  c = undone.clock;
+  expect(c.moveNo).toBe(78);
+  expect(c.p1.mainMs).toBe(
+    before.p1.mainMs - 5000 - CLASSIC.incrementMs - CLASSIC.bonusMs!,
+  );
+  expect(c.p2.mainMs).toBe(
+    before.p2.mainMs - CLASSIC.incrementMs - CLASSIC.bonusMs!,
+  );
+  c = clockAfterMove(c, 1, 85000).clock;
+  c = clockAfterMove(c, 2, 85000).clock;
+  expect(c.p1.mainMs).toBe(before.p1.mainMs - 5000);
+  expect(c.p2.mainMs).toBe(before.p2.mainMs);
+});
+
+test("暂停时悔棋不扣暂停时间，已经超时不能靠悔棋恢复", () => {
+  let c = clockAfterMove(createClock(CHESS, 1, 0), 1, 2000).clock;
+  const paused = clockAfterUndo(c, [1], 1, 90000, false);
+  expect(paused.clock.p1.mainMs).toBe(CHESS.mainMs - 2000);
+  expect(paused.clock.p2.mainMs).toBe(CHESS.mainMs);
+  c = { ...c, p2: { ...c.p2, mainMs: 100 } };
+  expect(clockAfterUndo(c, [1], 1, 2200).timeout).toBe(2);
 });

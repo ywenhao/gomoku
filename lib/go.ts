@@ -9,6 +9,7 @@ import type { Difficulty, Player } from "./gomoku";
 
 export const GO_SIZES = [9, 13, 19] as const;
 export type GoSize = (typeof GO_SIZES)[number];
+export const DEFAULT_GO_SIZE: GoSize = 19;
 export const GO_KOMI = 7.5;
 
 export interface GoMove {
@@ -47,7 +48,8 @@ export interface GoPlayResult {
   ko: number;
 }
 
-export const goIdx = (x: number, y: number, size: number): number => y * size + x;
+export const goIdx = (x: number, y: number, size: number): number =>
+  y * size + x;
 export const goOther = (p: Player): Player => (p === 1 ? 2 : 1);
 
 const NEIGHBOR_CACHE = new Map<number, number[][]>();
@@ -161,12 +163,31 @@ export function playGo(
   player: Player,
   ko = -1,
 ): GoPlayResult {
-  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= size || y >= size) {
-    return { ok: false, reason: "occupied", board: board.slice(), captured: [], ko };
+  if (
+    !Number.isInteger(x) ||
+    !Number.isInteger(y) ||
+    x < 0 ||
+    y < 0 ||
+    x >= size ||
+    y >= size
+  ) {
+    return {
+      ok: false,
+      reason: "occupied",
+      board: board.slice(),
+      captured: [],
+      ko,
+    };
   }
   const i = goIdx(x, y, size);
   if (board[i] !== 0) {
-    return { ok: false, reason: "occupied", board: board.slice(), captured: [], ko };
+    return {
+      ok: false,
+      reason: "occupied",
+      board: board.slice(),
+      captured: [],
+      ko,
+    };
   }
   if (i === ko) {
     return { ok: false, reason: "ko", board: board.slice(), captured: [], ko };
@@ -184,7 +205,13 @@ export function playGo(
   // 再检查自己是否自杀（提子后仍无气）
   const own = goGroup(next, size, i);
   if (!own || own.liberties.length === 0) {
-    return { ok: false, reason: "suicide", board: board.slice(), captured: [], ko };
+    return {
+      ok: false,
+      reason: "suicide",
+      board: board.slice(),
+      captured: [],
+      ko,
+    };
   }
 
   // 单子提单子、且己方也只有一口气：形成打劫，禁止立即回提
@@ -214,7 +241,8 @@ export function goStateFromMoves(
 
   for (let n = 0; n < moves.length; n++) {
     const m = moves[n];
-    if (!m || m.p !== (n%2===0?1:2) || typeof m.pass !== "boolean") return null;
+    if (!m || m.p !== (n % 2 === 0 ? 1 : 2) || typeof m.pass !== "boolean")
+      return null;
     if (m.pass) {
       passes++;
       ko = -1;
@@ -301,8 +329,7 @@ export function scoreGo(
   const blackArea = blackStones + blackTerritory;
   const whiteArea = whiteStones + whiteTerritory + komi;
   const margin = Math.abs(blackArea - whiteArea);
-  const winner: 0 | Player =
-    margin === 0 ? 0 : blackArea > whiteArea ? 1 : 2;
+  const winner: 0 | Player = margin === 0 ? 0 : blackArea > whiteArea ? 1 : 2;
   return {
     blackStones,
     whiteStones,
@@ -318,7 +345,8 @@ export function scoreGo(
 
 /** 把结果转成一句中文，例如「黑棋 3.5 子胜」。 */
 export function goResultText(result: GoScoreDetail): string {
-  if (result.reason) return `${result.winner === 1 ? "黑棋" : result.winner === 2 ? "白棋" : "双方"} · ${result.reason}`;
+  if (result.reason)
+    return `${result.winner === 1 ? "黑棋" : result.winner === 2 ? "白棋" : "双方"} · ${result.reason}`;
   if (result.winner === 0) return "和棋";
   const side = result.winner === 1 ? "黑棋" : "白棋";
   return `${side} ${result.margin.toFixed(1)} 点胜`;

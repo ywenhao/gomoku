@@ -17,7 +17,7 @@ function flavor(
   scored: boolean,
   mode?: Mode,
 ): string {
-  if (mode === "aiai") return "人机大战对局，不计入积分。";
+  if (mode === "aiai") return "AI 观战对局，不计入积分。";
   if (!scored) return "本地双人对局，不计入积分。";
   if (outcome === "win") {
     if (stars >= 3) return "完美的一局，AI 全程没找到机会。";

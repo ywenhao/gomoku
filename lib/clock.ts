@@ -217,6 +217,30 @@ export function findTimeControl(
   );
 }
 
+export function timeControlSummary(control: TimeControl): string {
+  if (control.kind === "per-move")
+    return `每手 / 回合 ${control.mainMs / 1000} 秒`;
+  const main = `每方 ${control.mainMs / 60_000} 分钟`;
+  return control.kind === "increment"
+    ? `${main}，每走一手加 ${control.incrementMs / 1000} 秒`
+    : `${main}，主时间用尽后有 ${control.byoyomiPeriods} 次 ${control.byoyomiMs / 1000} 秒读秒`;
+}
+
+export function describeTimeControl(control: TimeControl): string {
+  let text = timeControlSummary(control) + "。";
+  if (control.kind === "byoyomi")
+    text +=
+      "读秒是主时间用尽后启用的单手时限。及时落子会重置当前读秒，用尽一次就减少一次，全部耗尽判负。";
+  else if (control.kind === "increment")
+    text +=
+      "加秒在完成一手后计入该方余时；双方独立计时，不能在超时后靠加秒继续对局。";
+  else
+    text += "新的一手 / 回合开始后重置时限；六子棋同回合的两子共用这段时间。";
+  if (control.movesToGo !== undefined && control.bonusMs !== undefined)
+    text += `每方第 ${control.movesToGo} 步完成后，该方另加 ${control.bonusMs / 60_000} 分钟。`;
+  return text;
+}
+
 function sideFor(control: TimeControl): SideClock {
   return {
     mainMs: control.mainMs,
@@ -427,6 +451,38 @@ export function clockAfterMove(
     clock: { ...next, turn: nextTurn, moveNo, lastAt: now },
     timeout: null,
   };
+}
+
+/** Withdraw completed turns and their awards, without refunding thinking time. */
+export function clockAfterUndo(
+  clock: MatchClock,
+  movers: readonly Player[],
+  turn: Player,
+  now: number,
+  running = true,
+): TickResult {
+  const ticked = running ? tickClock(clock, now) : { clock, timeout: null };
+  if (ticked.timeout !== null) return ticked;
+  let next = ticked.clock;
+  for (let i = movers.length - 1; i >= 0 && next.moveNo > 0; i--) {
+    const player = movers[i],
+      control = next.control;
+    if (control.kind === "increment") {
+      const bonus =
+        control.movesToGo !== undefined &&
+        Math.ceil(next.moveNo / 2) === control.movesToGo
+          ? (control.bonusMs ?? 0)
+          : 0;
+      const side = sideOf(next, player);
+      next = withSide(next, player, {
+        ...side,
+        mainMs: Math.max(0, side.mainMs - control.incrementMs - bonus),
+      });
+    }
+    next = { ...next, moveNo: next.moveNo - 1 };
+  }
+  next = { ...next, turn, lastAt: now };
+  return { clock: next, timeout: isFlagDown(sideOf(next, turn)) ? turn : null };
 }
 
 /** 悔棋 / 回看后把时钟换回某方，不改变剩余时间。 */

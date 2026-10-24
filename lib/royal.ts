@@ -39,6 +39,8 @@ export function squareName(i: number, kind: RoyalKind): string {
   );
 }
 export function parseSquare(s: string, kind: RoyalKind): number {
+  if (!(kind === "chess" ? /^[a-h][1-8]$/ : /^[a-i](?:10|[1-9])$/).test(s))
+    return -1;
   const x = s.charCodeAt(0) - 97,
     y = heightOf(kind) - Number(s.slice(1));
   return x >= 0 && x < widthOf(kind) && y >= 0 && y < heightOf(kind)
@@ -110,6 +112,35 @@ export function fromFen(kind: RoyalKind, fen: string): RoyalState | null {
     checks: [],
     result: null,
   };
+  if (kind === "chess") {
+    if (ep >= 0) {
+      const direction = s.turn === 1 ? 8 : -8;
+      if (
+        Math.floor(ep / 8) !== (s.turn === 1 ? 2 : 5) ||
+        board[ep] !== 0 ||
+        board[ep + direction] !== -sign(s.turn) ||
+        board[ep - direction] !== 0
+      )
+        return null;
+    }
+    for (const [right, k, r, p] of [
+      ["K", 60, 63, 1],
+      ["Q", 60, 56, 1],
+      ["k", 4, 7, -1],
+      ["q", 4, 0, -1],
+    ] as const) {
+      if (castle.includes(right) && (board[k] !== 6 * p || board[r] !== 4 * p))
+        return null;
+    }
+  } else {
+    if (castle || ep >= 0) return null;
+    for (const p of [1, 2] as Player[]) {
+      const k = board.indexOf(6 * sign(p)),
+        x = k % 9,
+        y = Math.floor(k / 9);
+      if (x < 3 || x > 5 || (p === 1 ? y < 7 : y > 2)) return null;
+    }
+  }
   if (
     kind === "chess" &&
     board.some((v, i) => Math.abs(v) === 1 && (i < 8 || i >= 56))

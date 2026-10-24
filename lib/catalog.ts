@@ -3,7 +3,13 @@
  * 以后加新棋类只要补一条记录和对应组件。
  */
 
-import type { GameKind } from "./gomoku";
+import type { GameKind, Mode } from "./gomoku";
+
+export const MODE_LABELS: Record<Mode, string> = {
+  pve: "对战 AI",
+  pvp: "双人",
+  aiai: "AI 观战",
+};
 
 export type GameFamily = "stone" | "race" | "chess" | "war";
 
@@ -16,7 +22,7 @@ export interface GameMeta {
   family: GameFamily;
   players: string;
   board: string;
-  /** 默认是否有人机 / 人机大战 */
+  /** 默认是否有对战 AI / AI 观战 */
   modes: readonly ("pve" | "pvp" | "aiai")[];
   /** 首页设置里显示的时间规则 */
   clock: string;
@@ -152,7 +158,9 @@ export function gameName(kind: GameKind): string {
 }
 
 export function isComplexGame(kind: GameKind): boolean {
-  return kind === "go" || kind === "chess" || kind === "xiangqi" || kind === "junqi";
+  return (
+    kind === "go" || kind === "chess" || kind === "xiangqi" || kind === "junqi"
+  );
 }
 
 export function isStoneGame(kind: GameKind): boolean {

@@ -9,10 +9,10 @@ const launch = (extra: Record<string, unknown> = {}) =>
 /** 主页选择围棋后开新局 */
 async function newGo(
   app: Awaited<ReturnType<typeof open>>,
-  size?: "9" | "13" | "19",
+  size: "9" | "13" | "19" = "9",
 ) {
   await app.press("id:seg-game-go");
-  if (size) await app.press(`id:go-${size}`);
+  await app.press(`id:go-${size}`);
   await app.press("id:home-new");
   await app.waitFor("id:go-pass");
 }
@@ -22,14 +22,14 @@ async function homePvp(app: Awaited<ReturnType<typeof open>>) {
   await app.press("id:seg-pvp");
 }
 
-test("首页是「弈境」：多棋类入口、人机大战、残局、学棋与棋谱库都在首屏", async () => {
+test("首页是「弈境」：多棋类入口、AI 观战、残局、学棋与棋谱库都在首屏", async () => {
   const app = await launch();
   const texts = app.texts();
   expect(texts).toContain("弈境");
   expect(has(texts, "八种棋类")).toBe(true);
   expect(texts).toContain("五子棋");
   expect(texts).toContain("围棋");
-  expect(has(texts, "人机大战")).toBe(true);
+  expect(has(texts, "AI 观战")).toBe(true);
   expect(has(texts, "残局挑战")).toBe(true);
   expect(has(texts, "学棋")).toBe(true);
   expect(has(texts, "棋谱库")).toBe(true);
@@ -147,12 +147,12 @@ test("围棋未下完的棋可以返回首页继续，重开应用后也能恢�
   expect(has(again.texts(), "黑棋落子")).toBe(true);
 });
 
-test("人机大战约两秒一手，能暂停、逐步回看、整局回放并保存棋谱", async () => {
+test("AI 观战约两秒一手，能暂停、逐步回看、整局回放并保存棋谱", async () => {
   const app = await launch({ clock: {} });
   await app.press("id:seg-easy");
   await app.press("id:home-aiai");
   await app.waitFor("id:cell-7-7");
-  expect(has(app.texts(), "人机大战")).toBe(true);
+  expect(has(app.texts(), "AI 观战")).toBe(true);
   expect(has(app.texts(), "0 手")).toBe(true);
 
   // 不到 2 秒不落子，过了 2 秒走第一手
@@ -226,13 +226,14 @@ test("人机大战约两秒一手，能暂停、逐步回看、整局回放并�
   });
 });
 
-test("围棋人机大战也能暂停、回看并保存棋谱", async () => {
+test("围棋AI 观战也能暂停、回看并保存棋谱", async () => {
   const app = await launch({ clock: {} });
   await app.press("id:seg-easy");
   await app.press("id:seg-game-go");
+  await app.press("id:go-9");
   await app.press("id:home-aiai");
   await app.waitFor("id:go-pause");
-  expect(has(app.texts(), "人机大战")).toBe(true);
+  expect(has(app.texts(), "AI 观战")).toBe(true);
   expect(has(app.texts(), "9 路")).toBe(true);
 
   await app.clock.runFor(1800);

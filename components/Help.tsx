@@ -1,5 +1,6 @@
 import { GAMES, gameName } from "../lib/catalog";
 import { GUIDES } from "../lib/guides";
+import { TIME_CONTROLS, describeTimeControl } from "../lib/clock";
 import { Scroll, Text, View, computed, signal, type JSX } from "nsh";
 import { windowSize } from "nsh/device";
 import { Board, type BoardMark } from "./Board";
@@ -261,8 +262,9 @@ function GomokuHelp() {
           右上角「菜单」可调整模式、难度、限时与声音；打开菜单或帮助时倒计时暂停。
         </Bullet>
         <Bullet>
-          人机模式悔棋一次退回你和 AI 各一手，扣 15 分；超时由系统替你落一手，
-          扣 10 分。双人模式只记录战绩，不计积分；人机大战不计分，可暂停与回放。
+          对战 AI模式悔棋一次退回你和 AI 各一手，扣 15
+          分；超时由系统替你落一手， 扣 10 分。双人模式只记录战绩，不计积分；AI
+          观战不计分，可暂停与回放。
         </Bullet>
         <Bullet>
           桌面快捷键：U 悔棋、R 重新开始、M 菜单、Esc 关闭帮助或浮层。
@@ -596,6 +598,22 @@ export function HelpPanel(props: { kind?: GameKind; onClose: () => void }) {
             </Section>
           )}
         </Each>
+        <Section title="快棋、加秒和读秒是什么？">
+          <Para>
+            快棋、超快棋表示比赛用时长短，不是 AI
+            难度。想从容思考可选更长的主时间；熟悉规则后再尝试较短时限。每方的时间分别计算，选好时限后再开始新对局。
+          </Para>
+          <Each of={TIME_CONTROLS[active()]}>
+            {(t) => (
+              <View style={{ gap: 5, marginTop: 8 }}>
+                <Text style={{ color: C.ink, fontSize: 12, fontWeight: "600" }}>
+                  {t().label}
+                </Text>
+                <Para>{describeTimeControl(t())}</Para>
+              </View>
+            )}
+          </Each>
+        </Section>
         <Section title="操作引导">
           <Each of={GUIDES[active()].steps}>
             {(text, i) => (

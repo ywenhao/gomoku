@@ -32,7 +32,10 @@ test("六子棋双子回合共用时限，存档恢复与棋谱重放", async ()
   await app.press("id:seg-pvp");
   await app.press("id:home-new");
   await app.waitFor("id:connect6-screen");
+  await app.waitFor("id:cell-9-9");
+  await app.waitUntil(() => app.enabled("id:cell-9-9"));
   await app.press("id:cell-9-9");
+  await app.waitFor("id:stone-9-9-b");
   expect(has(app, "玩家2")).toBe(true);
   await app.clock.runFor(10000);
   await app.press("id:cell-8-9");
@@ -168,7 +171,7 @@ test("象棋残局实际解题、重试与切换棋种不会留下旧棋盘", as
   expect(app.shows("id:extra-cell-90")).toBe(false);
 });
 
-test("围棋数子可以保存后恢复，AI观战不覆盖玩家存档", async () => {
+test("围棋数子可以保存后恢复，AI 观战不覆盖玩家存档", async () => {
   const app = await launch();
   await app.press("id:seg-game-go");
   await app.press("id:seg-pvp");

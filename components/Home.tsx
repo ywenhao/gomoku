@@ -1,5 +1,17 @@
-import { GAMES, gameName, gameMeta, isComplexGame } from "../lib/catalog";
-import { formatClock, sideOf, TIME_CONTROLS } from "../lib/clock";
+import {
+  MODE_LABELS,
+  GAMES,
+  gameName,
+  gameMeta,
+  isComplexGame,
+} from "../lib/catalog";
+import {
+  formatClock,
+  sideOf,
+  TIME_CONTROLS,
+  timeControlSummary,
+  type TimeControl,
+} from "../lib/clock";
 import { savedMoveCount } from "../lib/save";
 import { Scroll, Text, View } from "nsh";
 import { C, ConfirmButton, PressButton, Segmented, StoneDot } from "./ui";
@@ -9,9 +21,9 @@ import type { GoSize } from "../lib/go";
 import type { SavedGame } from "../lib/save";
 
 const MODES: readonly { key: Mode; label: string }[] = [
-  { key: "pve", label: "人机" },
+  { key: "pve", label: MODE_LABELS.pve },
   { key: "pvp", label: "双人" },
-  { key: "aiai", label: "人机大战" },
+  { key: "aiai", label: MODE_LABELS.aiai },
 ];
 
 const LEVELS: readonly { key: Difficulty; label: string }[] = [
@@ -56,13 +68,75 @@ function SectionTitle(props: { text: string }) {
   );
 }
 
+function TimeChoice(props: {
+  control: TimeControl;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <View
+      role="button"
+      testID={`clock-${props.control.id}`}
+      accessibilityLabel={props.control.label}
+      accessibilityState={{ selected: props.selected }}
+      accessibilityHint={timeControlSummary(props.control)}
+      onPress={props.onPress}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: props.selected ? "#caa56d" : C.line,
+        backgroundColor: props.selected ? "#fbf3e5" : C.panel,
+      }}
+      activeStyle={{ opacity: 0.72 }}
+    >
+      <View
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: 9,
+          borderWidth: 1.5,
+          borderColor: props.selected ? C.accent : C.muted,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <If when={props.selected}>
+          <View
+            style={{
+              width: 9,
+              height: 9,
+              borderRadius: 4.5,
+              backgroundColor: C.accent,
+            }}
+          />
+        </If>
+      </View>
+      <View style={{ flex: 1, gap: 4 }}>
+        <Text style={{ fontSize: 12, fontWeight: "600", color: C.ink }}>
+          {props.control.label}
+        </Text>
+        <Text style={{ fontSize: 11, lineHeight: 17, color: C.muted }}>
+          {timeControlSummary(props.control)}
+        </Text>
+      </View>
+      <If when={props.selected}>
+        <Text style={{ color: C.accent, fontSize: 10 }}>已选</Text>
+      </If>
+    </View>
+  );
+}
+
 function savedLabel(saved: SavedGame): string {
   const name = gameName(saved.kind);
   const who =
     saved.mode === "pve"
-      ? `人机 · ${LEVEL_NAME[saved.level]}`
+      ? `对战 AI · ${LEVEL_NAME[saved.level]}`
       : saved.mode === "aiai"
-        ? "人机大战"
+        ? "AI 观战"
         : "本地双人";
   const size = saved.kind === "go" ? ` · ${saved.goSize ?? 19} 路` : "";
   const clock = saved.limitOn
@@ -92,16 +166,16 @@ function KindCard(props: {
       style={{
         flexGrow: 1,
         flexBasis: "45%",
-        minWidth: 140,
+        minWidth: 128,
         paddingVertical: 12,
         paddingHorizontal: 13,
         borderRadius: 16,
-        backgroundColor: props.selected ? C.ink : C.panel,
+        backgroundColor: props.selected ? "#fbf3e5" : C.panel,
         borderWidth: 1,
-        borderColor: props.selected ? C.ink : C.line,
+        borderColor: props.selected ? C.accent : C.line,
         gap: 5,
         boxShadow: props.selected
-          ? "0 8px 18px rgba(40,26,12,0.20)"
+          ? "0 3px 8px rgba(40,26,12,0.08)"
           : "0 1px 2px rgba(58,40,22,0.06)",
       }}
       activeStyle={{ opacity: 0.72 }}
@@ -113,7 +187,7 @@ function KindCard(props: {
           style={{
             fontSize: 15,
             fontWeight: "700",
-            color: props.selected ? "#fdfaf3" : C.ink,
+            color: C.ink,
             letterSpacing: 1,
             marginLeft: 2,
           }}
@@ -126,7 +200,7 @@ function KindCard(props: {
           fontSize: 8.5,
           fontWeight: "600",
           letterSpacing: 1.6,
-          color: props.selected ? "rgba(253,250,243,0.62)" : C.muted,
+          color: C.muted,
         }}
       >
         {props.latin}
@@ -135,7 +209,7 @@ function KindCard(props: {
         style={{
           fontSize: 10.5,
           lineHeight: 15,
-          color: props.selected ? "rgba(253,250,243,0.78)" : C.muted,
+          color: C.muted,
         }}
       >
         {props.desc}
@@ -330,11 +404,12 @@ export function Home(props: {
                     props.mode === "aiai"
                       ? "AI 对 AI · 约 2 秒一手"
                       : props.mode === "pve"
-                        ? `人机 · ${LEVEL_NAME[props.level]}`
+                        ? `对战 AI · ${LEVEL_NAME[props.level]}`
                         : "本地双人轮流落子"
                   }
                   hint="按下面的设置开一局"
                   tone="primary"
+                  size="large"
                   testID="home-new"
                   onPress={props.onNewGame}
                 />
@@ -382,6 +457,7 @@ export function Home(props: {
                   subLabel={savedLabel(saved())}
                   hint="恢复到上次退出的棋盘"
                   tone="primary"
+                  size="large"
                   testID="home-continue"
                   onPress={props.onContinue}
                 />
@@ -405,7 +481,7 @@ export function Home(props: {
           >
             <Entry
               testID="home-aiai"
-              title="人机大战"
+              title="AI 观战"
               sub="AI 对 AI · 可暂停、回放与保存棋谱"
               badge="观战"
               onPress={props.onAiai}
@@ -493,7 +569,7 @@ export function Home(props: {
                 <View>
                   <Text style={{ fontSize: 13.5, color: C.ink }}>棋盘路数</Text>
                   <Text style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
-                    新手推荐 9 路，正式对局 19 路
+                    19 路为标准棋盘，9 路适合入门
                   </Text>
                 </View>
                 <Segmented
@@ -530,18 +606,15 @@ export function Home(props: {
                 </Text>
                 <Each of={TIME_CONTROLS[props.kind]}>
                   {(t) => (
-                    <PressButton
-                      label={t().label}
-                      tone={
-                        props.timeControl === t().id ? "primary" : "default"
-                      }
-                      testID={`clock-${t().id}`}
+                    <TimeChoice
+                      control={t()}
+                      selected={props.timeControl === t().id}
                       onPress={() => props.onTimeControl(t().id)}
                     />
                   )}
                 </Each>
                 <Text style={{ color: C.muted, fontSize: 11, lineHeight: 18 }}>
-                  主时间按双方分别累计，超时按规则判负；具体赛事时限由规程指定。
+                  选择的时限用于新对局；快棋、加秒与读秒的含义可在「玩法与帮助」查看。
                 </Text>
               </View>
             </If>
@@ -574,8 +647,8 @@ export function Home(props: {
               lineHeight: 17,
             }}
           >
-            设置用于新对局；「继续游戏」沿用存档里的棋类、模式与难度。
-            人机大战由两个 AI 自动对弈，可随时暂停和逐步回看。
+            设置用于新对局；「继续游戏」沿用存档里的棋类、模式与难度。 AI
+            观战由两个 AI 自动对弈，可随时暂停和逐步回看。
           </Text>
 
           <View

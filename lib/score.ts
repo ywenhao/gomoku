@@ -9,6 +9,11 @@ import type { Difficulty, GameKind } from "./gomoku";
 
 export type Outcome = "win" | "loss" | "draw";
 
+/** Results are from player one's perspective; an unscored match is not a draw. */
+export function outcomeForWinner(winner: number): Outcome {
+  return winner === 0 ? "draw" : winner === 1 ? "win" : "loss";
+}
+
 /** 每手限时（秒） */
 export const MOVE_SECONDS = 30;
 /** 每次悔棋扣分 */
@@ -88,7 +93,8 @@ export function scoreGame(f: Facts): Breakdown {
       clamp((SPEED_TARGET - f.seconds) / SPEED_TARGET, 0, 1) * 120,
     );
     add("效率奖励", clamp((55 - f.moves) * 3, 0, 90));
-    if (f.streak >= 2) add(`连胜 ×${f.streak}`, Math.min(50, (f.streak - 1) * 15));
+    if (f.streak >= 2)
+      add(`连胜 ×${f.streak}`, Math.min(50, (f.streak - 1) * 15));
   } else if (f.outcome === "draw") {
     add("和棋", 30);
   } else {
