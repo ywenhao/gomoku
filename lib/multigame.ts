@@ -1,7 +1,7 @@
 import { type GameKind, type Difficulty, type Player } from "./gomoku";
 import {
   createConnect6,
-  playConnect6,
+  moveConnect6,
   connect6Ai,
   type C6State,
 } from "./connect6";
@@ -83,8 +83,12 @@ export function applyAction(m: Match, a: Action): Match | null {
   if (a.roll !== undefined && typeof a.roll !== "boolean") return null;
   if (m.kind === "ludo" && a.roll && a.die === undefined) return null;
   let state: Match["state"] | null = null;
-  if (m.kind === "connect6" && a.to !== undefined)
-    state = playConnect6(m.state, a.to % 19, Math.floor(a.to / 19));
+  if (
+    m.kind === "connect6" &&
+    a.from !== undefined &&
+    a.to !== undefined
+  )
+    state = moveConnect6(m.state, a.from, a.to);
   else if (m.kind === "ludo")
     state = a.roll
       ? rollLudo(m.state, a.die)
@@ -105,10 +109,7 @@ export function applyAction(m: Match, a: Action): Match | null {
 }
 export function matchAi(m: Match, level: Difficulty): Action | null {
   if (m.state.result) return null;
-  if (m.kind === "connect6") {
-    const c = connect6Ai(m.state, level)[0];
-    return c ? { to: c.y * 19 + c.x } : null;
-  }
+  if (m.kind === "connect6") return connect6Ai(m.state, level);
   if (m.kind === "ludo") {
     if (!m.state.die)
       return { roll: true, die: 1 + Math.floor(Math.random() * 6) };

@@ -3,6 +3,7 @@ import {
   SOUND_NAMES,
   SOUND_RATE,
   SOUND_SECONDS,
+  soundFileUri,
   synthesizeSound,
 } from "./sound";
 
@@ -23,7 +24,7 @@ function peakOf(wav: Uint8Array): number {
 }
 
 test("每个音效都是可播放的单声道 16-bit WAV", () => {
-  expect(SOUND_NAMES.length).toBe(7);
+  expect(SOUND_NAMES.length).toBe(10);
   for (const name of SOUND_NAMES) {
     const wav = synthesizeSound(name);
     const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
@@ -62,4 +63,14 @@ test("音效合成可复现，并且做了峰值归一化", () => {
   // 目标峰值 0.8，量化后应接近 26214，但不能削波
   expect(peakOf(first)).toBeGreaterThan(24000);
   expect(peakOf(first)).toBeLessThanOrEqual(32767);
+});
+
+test("移动端音效文件地址使用 NSH 允许的单斜杠 file URI", () => {
+  expect(soundFileUri("/home/a b/棋.wav")).toBe(
+    "file:/home/a%20b/%E6%A3%8B.wav",
+  );
+  expect(soundFileUri("C:\\a b\\x.wav")).toBe("file:/C:/a%20b/x.wav");
+  expect(soundFileUri("file:///home/a%20b/x.wav")).toBe(
+    "file:/home/a%2520b/x.wav",
+  );
 });

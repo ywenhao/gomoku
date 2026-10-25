@@ -53,6 +53,8 @@ test("骰子重放确定，损坏动作、非法布阵与伪造时限被拒绝",
   expect(replayMatch("ludo", [{ roll: true }])).toBe(null);
   expect(replayMatch("chess", [{ from: 52, to: 20 }])).toBe(null);
   expect(replayMatch("connect6", [{ to: 361 }])).toBe(null);
+  expect(replayMatch("connect6", [{ to: 8 }])).toBe(null);
+  expect(replayMatch("connect6", [{ from: 8, to: 9 }])).not.toBe(null);
   expect(replayMatch("junqi", [], new Array(60).fill(0))).toBe(null);
   expect(restoreClock("chess", { control: { id: "custom" } }, 1)).toBe(null);
   const actions = [

@@ -2,7 +2,7 @@
  * 比赛时钟（纯函数）。
  *
  * 复杂棋种按正式比赛常用的「主时间 + 加秒 / 读秒」处理，超时判负；
- * 五子棋、六子棋、飞行棋和跳棋仍用每手 / 每回合 30 秒的休闲规则。
+ * 五子棋、六子冲、飞行棋和跳棋仍用每手 / 每回合 30 秒的休闲规则。
  *
  * 这里只算时间，不碰 UI：组件每 100ms 调一次 `tickClock`，落子时调
  * `clockAfterMove`。所有函数都不修改入参，方便单测。
@@ -235,7 +235,7 @@ export function describeTimeControl(control: TimeControl): string {
     text +=
       "加秒在完成一手后计入该方余时；双方独立计时，不能在超时后靠加秒继续对局。";
   else
-    text += "新的一手 / 回合开始后重置时限；六子棋同回合的两子共用这段时间。";
+    text += "新的一手 / 回合开始后重置时限。";
   if (control.movesToGo !== undefined && control.bonusMs !== undefined)
     text += `每方第 ${control.movesToGo} 步完成后，该方另加 ${control.bonusMs / 60_000} 分钟。`;
   return text;

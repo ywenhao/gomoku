@@ -36,6 +36,7 @@ import {
   ludoLegal,
   type CheckerPlayers,
 } from "../lib/race";
+import { c6LegalMoves } from "../lib/connect6";
 import { junqiMoves, validDeployment } from "../lib/junqi";
 import {
   createClock,
@@ -76,30 +77,26 @@ export function MultiGame(props: {
   const initial = props.initial?.kind === props.kind ? props.initial : null;
   const players: CheckerPlayers =
     initial?.checkerPlayers ?? props.checkerPlayers;
-  const initialBoard = signal(initial?.initialBoard);
-  const match = signal<Match>(
-    initial?.actions
-      ? (replayMatch(
-          props.kind,
-          initial.actions,
-          initial.initialBoard,
-          players,
-        ) ?? createMatch(props.kind, players))
-      : createMatch(props.kind, players),
-  );
-  const actions = signal<Action[]>(initial?.actions ?? []),
+  const restored = initial?.actions
+    ? replayMatch(props.kind, initial.actions, initial.initialBoard, players)
+    : null;
+  const initialBoard = signal(restored ? initial?.initialBoard : undefined);
+  const match = signal<Match>(restored ?? createMatch(props.kind, players));
+  const actions = signal<Action[]>(
+      restored && initial?.actions ? initial.actions : [],
+    ),
     selected = signal(-1),
     notice = signal("");
   const paused = signal(false),
     menu = signal(false),
     review = signal<number | null>(null),
     replaying = signal(false),
-    size = signal(340);
+    size = signal(0);
   const setup = signal(
-      props.kind === "junqi" && props.mode !== "aiai" && !initial ? 1 : 0,
+      props.kind === "junqi" && props.mode !== "aiai" && !restored ? 1 : 0,
     ),
     handoff = signal(
-      !!initial && props.kind === "junqi" && props.mode === "pvp",
+      !!restored && props.kind === "junqi" && props.mode === "pvp",
     ),
     drawOffer = signal(false);
   const started = signal(initial?.startedAt ?? Date.now()),
@@ -153,6 +150,7 @@ export function MultiGame(props: {
         .map((x) => x.to);
     if (m.kind === "checkers") return checkerMoves(m.state, from);
     if (m.kind === "junqi") return junqiMoves(m.state, from);
+    if (m.kind === "connect6") return c6LegalMoves(m.state, from);
     return [];
   });
   const promotion = signal<{ from: number; to: number } | null>(null);
@@ -189,6 +187,45 @@ export function MultiGame(props: {
       return player === players ? 1 : player + 1;
     if (props.kind === "ludo") return (player % 4) + 1;
     return player === 1 ? 2 : 1;
+  }
+  function actionSound(before: Match, next: Match, a: Action): SoundName {
+    if (a.roll) return "roll";
+    if (next.kind === "connect6") {
+      const captured =
+        next.state.moves[next.state.moves.length - 1]?.captured?.length ?? 0;
+      return captured ? "capture" : "place";
+    }
+    if (next.kind === "junqi") {
+      const to = a.to ?? -1;
+      return before.kind === "junqi" && before.state.board[to]
+        ? "capture"
+        : "place";
+    }
+    if (
+      (next.kind === "chess" && before.kind === "chess") ||
+      (next.kind === "xiangqi" && before.kind === "xiangqi")
+    ) {
+      const beforeCount = before.state.board.filter(Boolean).length;
+      const afterCount = next.state.board.filter(Boolean).length;
+      return afterCount < beforeCount ? "capture" : "place";
+    }
+    if (next.kind === "ludo" && before.kind === "ludo") {
+      const enemies = (m: Extract<Match, { kind: "ludo" }>, mover: number) =>
+        m.state.planes.reduce(
+          (n, row, p) =>
+            n + (p + 1 === mover ? 0 : row.filter((step) => step >= 0).length),
+          0,
+        );
+      return enemies(next, before.state.turn) < enemies(before, before.state.turn)
+        ? "capture"
+        : "place";
+    }
+    if (next.kind === "checkers" && before.kind === "checkers") {
+      const beforeCount = before.state.board.filter(Boolean).length;
+      const afterCount = next.state.board.filter(Boolean).length;
+      return afterCount < beforeCount ? "capture" : "place";
+    }
+    return "place";
   }
   function syncTime(now = Date.now()): boolean {
     if (!props.limitOn || props.mode === "aiai") return true;
@@ -260,7 +297,7 @@ export function MultiGame(props: {
       if (props.kind === "junqi" && props.mode === "pvp" && !next.state.result)
         handoff.set(true);
     });
-    props.playSound("place");
+    props.playSound(actionSound(before, next, a));
     if (
       (next.kind === "xiangqi" || next.kind === "chess") &&
       !next.state.result &&
@@ -282,6 +319,7 @@ export function MultiGame(props: {
       if (!v || (v > 0 ? 1 : 2) !== p) return;
       if (selected() < 0) {
         selected.set(i);
+        props.playSound("tick");
         return;
       }
       const board = m.state.board.slice();
@@ -289,6 +327,7 @@ export function MultiGame(props: {
       if (validDeployment(board, p as Player)) {
         match.set({ ...m, state: { ...m.state, board } });
         notice.set("布阵已调整");
+        props.playSound("tick");
       } else
         notice.set("非法布阵：军旗须在大本营，地雷在后两排，炸弹不得在前排");
       selected.set(-1);
@@ -296,15 +335,19 @@ export function MultiGame(props: {
     }
     if (!human()) return;
     const m = match();
-    if (m.kind === "connect6") {
-      commit({ to: i });
-      return;
-    }
     if (m.kind === "ludo") return;
     const v = m.state.board[i],
-      p = m.kind === "checkers" ? v : v > 0 ? 1 : v < 0 ? 2 : 0;
+      p =
+        m.kind === "checkers" || m.kind === "connect6"
+          ? v
+          : v > 0
+            ? 1
+            : v < 0
+              ? 2
+              : 0;
     if (p === turn()) {
       selected.set(selected() === i ? -1 : i);
+      props.playSound("tick");
       return;
     }
     if (!targets().includes(i)) {
@@ -385,6 +428,7 @@ export function MultiGame(props: {
       undos.update((v) => v + 1);
       clock.set(rewound.clock);
     });
+    props.playSound("undo");
     if (rewound.timeout !== null) {
       const result =
         m.kind === "chess" || m.kind === "xiangqi"
@@ -410,7 +454,7 @@ export function MultiGame(props: {
       initialBoard: initialBoard(),
       checkerPlayers: props.kind === "checkers" ? players : undefined,
       result: r
-        ? `${r.winner ? `玩家${r.winner}胜` : "和棋"} · ${"reason" in r ? r.reason : "连六"}`
+        ? `${r.winner ? `玩家${r.winner}胜` : "和棋"} · ${r.reason}`
         : undefined,
     });
     notice.set("棋谱已保存");
@@ -420,8 +464,7 @@ export function MultiGame(props: {
     const r = match().state.result;
     if (!r || settled) return;
     settled = true;
-    const reason =
-      "reason" in r ? r.reason : r.winner ? "连六获胜" : "棋盘已满";
+    const reason = r.reason;
     props.onSnapshot(null);
     props.playSound(
       r.winner === 0
@@ -485,15 +528,6 @@ export function MultiGame(props: {
             let a = matchAi(m, "easy");
             if (a) commit(a);
             if (
-              m.kind === "connect6" &&
-              match().kind === "connect6" &&
-              match().state.turn === m.state.turn &&
-              !match().state.result
-            ) {
-              a = matchAi(match(), "easy");
-              if (a) commit(a);
-            }
-            if (
               m.kind === "ludo" &&
               "die" in match().state &&
               (match().state as { die: number }).die
@@ -551,14 +585,31 @@ export function MultiGame(props: {
     }
   });
   const menuMaxHeight = Math.max(280, Math.min(640, windowSize().height - 72));
+  const boardAspect =
+    props.kind === "junqi"
+      ? 12 / 5
+      : props.kind === "xiangqi"
+        ? 10 / 9
+        : 1;
   return (
-    <View style={{ flex: 1, width: "100%" }}>
-      <Scroll
+    <View
+      style={{
+        flex: 1,
+        width: "100%",
+        alignItems: "center",
+        overflow: "hidden",
+      }}
+    >
+      <View
         testID={`${props.kind}-screen`}
-        style={{ flex: 1, width: "100%" }}
-        contentStyle={{ alignItems: "center", padding: 14 }}
+        style={{
+          flex: 1,
+          width: "100%",
+          maxWidth: 640,
+          padding: 8,
+          gap: 5,
+        }}
       >
-      <View style={{ width: "100%", maxWidth: 600, gap: 10 }}>
         <View
           style={{
             flexDirection: "row",
@@ -566,23 +617,25 @@ export function MultiGame(props: {
             alignItems: "center",
           }}
         >
-          <Text style={{ fontSize: 25, fontWeight: "700", color: C.ink }}>
+          <Text style={{ fontSize: 21, fontWeight: "700", color: C.ink }}>
             {gameName(props.kind)}
           </Text>
-          <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flexDirection: "row", gap: 6 }}>
             <PressButton
               label="规则"
               testID="extra-help"
               onPress={props.onHelp}
+              size="small"
             />
             <PressButton
               label="菜单"
               testID="extra-menu"
               onPress={() => menu.update((v) => !v)}
+              size="small"
             />
           </View>
         </View>
-        <Text style={{ color: C.muted, fontSize: 12 }}>
+        <Text style={{ color: C.muted, fontSize: 10 }}>
           {gameMeta(props.kind).board} ·{" "}
           {props.mode === "pvp"
             ? props.kind === "ludo"
@@ -595,11 +648,11 @@ export function MultiGame(props: {
               : "对战 AI"}{" "}
           · {props.limitOn ? control.label : "不限时"}
         </Text>
-        <GuideStrip kind={props.kind} />
+        <GuideStrip kind={props.kind} defaultOpen={false} compact />
         <Text
           testID="extra-status"
           style={{
-            fontSize: 15,
+            fontSize: 13,
             color: PLAYER_COLORS[turn() - 1],
             fontWeight: "600",
           }}
@@ -610,10 +663,10 @@ export function MultiGame(props: {
               ? `玩家${setup()}布阵`
               : handoff()
                 ? "请交给下一位玩家"
-                : `轮到玩家${turn()}${match().kind === "connect6" ? ` · 本回合剩${(match().state as { left: number }).left}子` : ""}${paused() ? " · 暂停" : ""}`}
+                : `轮到玩家${turn()}${paused() ? " · 暂停" : ""}`}
         </Text>
         <If when={props.limitOn && props.mode !== "aiai" && !setup()}>
-          <View style={{ flexDirection: "row", gap: 12 }}>
+          <View style={{ flexDirection: "row", gap: 10 }}>
             <If
               when={control.kind === "per-move"}
               else={
@@ -621,7 +674,7 @@ export function MultiGame(props: {
                   <Text
                     testID="extra-clock-1"
                     style={{
-                      fontSize: 16,
+                      fontSize: 12,
                       color: clockUrgent(clock().p1, control)
                         ? C.accent
                         : C.ink,
@@ -632,7 +685,7 @@ export function MultiGame(props: {
                   <Text
                     testID="extra-clock-2"
                     style={{
-                      fontSize: 16,
+                      fontSize: 12,
                       color: clockUrgent(clock().p2, control)
                         ? C.accent
                         : C.ink,
@@ -646,7 +699,7 @@ export function MultiGame(props: {
               <Text
                 testID="extra-clock-current"
                 style={{
-                  fontSize: 16,
+                  fontSize: 12,
                   color: clockUrgent(sideOf(clock(), clock().turn), control)
                     ? C.accent
                     : C.ink,
@@ -660,20 +713,38 @@ export function MultiGame(props: {
         <If when={notice()}>
           <Text
             testID="extra-notice"
-            style={{ fontSize: 13, color: C.accent, lineHeight: 20 }}
+            style={{ fontSize: 11, color: C.accent, lineHeight: 16 }}
           >
             {notice()}
           </Text>
         </If>
-        <If
-          when={handoff()}
-          else={
-            <View
-              style={{ alignItems: "center", width: "100%" }}
-              onLayout={(e) =>
-                size.set(Math.max(200, Math.min(520, e.size.width)))
-              }
-            >
+        <View
+          testID={`${props.kind}-board-area`}
+          style={{
+            flex: 1,
+            width: "100%",
+            minHeight: 0,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onLayout={(e) =>
+            size.set(
+              Math.max(
+                0,
+                Math.floor(
+                  Math.min(
+                    520,
+                    e.size.width,
+                    e.size.height / boardAspect,
+                  ),
+                ),
+              ),
+            )
+          }
+        >
+          <If
+            when={handoff()}
+            else={
               <MultiBoard
                 match={view}
                 size={size}
@@ -687,36 +758,42 @@ export function MultiGame(props: {
                 }}
                 reveal={props.mode === "aiai" || !!match().state.result}
               />
-            </View>
-          }
-        >
-          <View
-            style={{
-              height: 300,
-              backgroundColor: C.ink,
-              borderRadius: 16,
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 16,
-            }}
+            }
           >
-            <Text style={{ color: "#fff", fontSize: 18 }}>
-              棋盘已遮盖 · 交接设备
-            </Text>
-            <PressButton
-              label="我已接手，显示我的棋子"
-              testID="junqi-handoff"
-              onPress={() => {
-                handoff.set(false);
-                clock.update((c) => ({ ...c, lastAt: Date.now() }));
+            <View
+              style={{
+                flex: 1,
+                width: "100%",
+                minHeight: 0,
+                backgroundColor: C.ink,
+                borderRadius: 16,
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 12,
+                gap: 10,
               }}
-            />
-          </View>
-        </If>
+            >
+              <Text style={{ color: "#fff", fontSize: 15 }}>
+                棋盘已遮盖 · 交接设备
+              </Text>
+              <PressButton
+                label="我已接手，显示我的棋子"
+                testID="junqi-handoff"
+                size="small"
+                onPress={() => {
+                  handoff.set(false);
+                  props.playSound("tick");
+                  clock.update((c) => ({ ...c, lastAt: Date.now() }));
+                }}
+              />
+            </View>
+          </If>
+        </View>
         <If when={setup() > 0 && !handoff()}>
           <PressButton
             label="确认布阵"
             testID="junqi-ready"
+            size="small"
             onPress={() => {
               const m = match();
               if (
@@ -724,6 +801,7 @@ export function MultiGame(props: {
                 !validDeployment(m.state.board, setup() as Player)
               )
                 return;
+              props.playSound("tick");
               selected.set(-1);
               if (props.mode === "pvp" && setup() === 1) {
                 setup.set(2);
@@ -738,38 +816,44 @@ export function MultiGame(props: {
           />
         </If>
         <If when={props.kind === "ludo"}>
-          <PressButton
-            label={
-              "die" in match().state && (match().state as { die: number }).die
-                ? `骰子 ${(match().state as { die: number }).die} · 请选择飞机`
-                : "掷骰"
-            }
-            testID="ludo-roll"
-            disabled={
-              !human() ||
-              ("die" in match().state &&
-                (match().state as { die: number }).die > 0)
-            }
-            onPress={() =>
-              commit({ roll: true, die: 1 + Math.floor(Math.random() * 6) })
-            }
-          />
-          <Each of={[0, 1, 2, 3]}>
-            {(i) => (
-              <PressButton
-                label={`移动飞机${i() + 1}`}
-                testID={`ludo-move-${i()}`}
-                disabled={
-                  !human() ||
-                  match().kind !== "ludo" ||
-                  !ludoLegal(
-                    (match() as Extract<Match, { kind: "ludo" }>).state,
-                  ).includes(i())
-                }
-                onPress={() => commit({ plane: i() })}
-              />
-            )}
-          </Each>
+          <View style={{ flexDirection: "row", gap: 5 }}>
+            <PressButton
+              label={
+                "die" in match().state && (match().state as { die: number }).die
+                  ? `骰子 ${(match().state as { die: number }).die}`
+                  : "掷骰"
+              }
+              testID="ludo-roll"
+              size="small"
+              grow
+              disabled={
+                !human() ||
+                ("die" in match().state &&
+                  (match().state as { die: number }).die > 0)
+              }
+              onPress={() =>
+                commit({ roll: true, die: 1 + Math.floor(Math.random() * 6) })
+              }
+            />
+            <Each of={[0, 1, 2, 3]}>
+              {(i) => (
+                <PressButton
+                  label={`飞机${i() + 1}`}
+                  testID={`ludo-move-${i()}`}
+                  size="small"
+                  grow
+                  disabled={
+                    !human() ||
+                    match().kind !== "ludo" ||
+                    !ludoLegal(
+                      (match() as Extract<Match, { kind: "ludo" }>).state,
+                    ).includes(i())
+                  }
+                  onPress={() => commit({ plane: i() })}
+                />
+              )}
+            </Each>
+          </View>
         </If>
         <If
           when={
@@ -781,30 +865,38 @@ export function MultiGame(props: {
             testID="xiangqi-adjudication"
             style={{
               backgroundColor: C.panel,
-              padding: 14,
+              padding: 10,
               borderRadius: 12,
-              gap: 8,
+              gap: 6,
             }}
           >
-            <Text style={{ color: C.ink, fontSize: 14, lineHeight: 22 }}>
-              局面已三次重复。单方长将已自动判断；长捉、兑、献、拦等复杂棋例需要按赛事棋例由裁判裁定。棋钟暂停，可查看刚才的走法后录入裁定。
+            <Text style={{ color: C.ink, fontSize: 12, lineHeight: 18 }}>
+              局面三次重复。长将已自动判负；长捉、兑、献、拦等复杂棋例请按赛事棋例裁定。
             </Text>
-            <PressButton
-              label="双方均允许不变 · 和棋"
-              testID="xq-rule-draw"
-              onPress={() => finish(0, "重复局面，双方允许不变")}
-            />
-            <PressButton
-              label="红方长捉等违规 · 红负"
-              testID="xq-rule-red-loss"
-              onPress={() => finish(2, "裁判裁定：红方禁着不变判负")}
-            />
-            <PressButton
-              label="黑方长捉等违规 · 黑负"
-              testID="xq-rule-black-loss"
-              onPress={() => finish(1, "裁判裁定：黑方禁着不变判负")}
-            />
-            <Text style={{ color: C.muted, fontSize: 12 }}>
+            <View style={{ flexDirection: "row", gap: 5 }}>
+              <PressButton
+                label="双方不变和棋"
+                testID="xq-rule-draw"
+                size="small"
+                grow
+                onPress={() => finish(0, "重复局面，双方允许不变")}
+              />
+              <PressButton
+                label="红方违规判负"
+                testID="xq-rule-red-loss"
+                size="small"
+                grow
+                onPress={() => finish(2, "裁判裁定：红方禁着不变判负")}
+              />
+              <PressButton
+                label="黑方违规判负"
+                testID="xq-rule-black-loss"
+                size="small"
+                grow
+                onPress={() => finish(1, "裁判裁定：黑方禁着不变判负")}
+              />
+            </View>
+            <Text style={{ color: C.muted, fontSize: 10, lineHeight: 15 }}>
               {actions()
                 .slice(-12)
                 .filter((a) => a.from !== undefined)
@@ -817,8 +909,10 @@ export function MultiGame(props: {
           </View>
         </If>
         <If when={promotion()}>
-          <Text style={{ color: C.ink }}>兵到达末排，请选择升变棋子：</Text>
-          <View style={{ flexDirection: "row", gap: 6 }}>
+          <Text style={{ color: C.ink, fontSize: 12 }}>
+            兵到达末排，请选择升变棋子：
+          </Text>
+          <View style={{ flexDirection: "row", gap: 5 }}>
             <Each
               of={[
                 { t: 5, label: "后" },
@@ -831,6 +925,8 @@ export function MultiGame(props: {
                 <PressButton
                   label={p().label}
                   testID={`promote-${p().t}`}
+                  size="small"
+                  grow
                   onPress={() => {
                     const a = promotion();
                     if (a) commit({ ...a, promotion: p().t });
@@ -840,10 +936,12 @@ export function MultiGame(props: {
             </Each>
           </View>
         </If>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        <View style={{ flexDirection: "row", gap: 5 }}>
           <PressButton
             label="悔棋"
             testID="extra-undo"
+            size="small"
+            grow
             disabled={
               !actions().length ||
               !!match().state.result ||
@@ -855,12 +953,16 @@ export function MultiGame(props: {
           <PressButton
             label={paused() ? "继续" : "暂停"}
             testID="extra-pause"
+            size="small"
+            grow
             disabled={!!match().state.result || setup() > 0}
             onPress={() => paused.update((v) => !v)}
           />
           <PressButton
             label="保存棋谱"
             testID="extra-record"
+            size="small"
+            grow
             disabled={
               props.kind === "junqi" &&
               props.mode !== "aiai" &&
@@ -871,6 +973,8 @@ export function MultiGame(props: {
           <PressButton
             label="首页"
             testID="extra-back"
+            size="small"
+            grow
             onPress={() => {
               props.onSnapshot(snapshot());
               props.onHome();
@@ -878,12 +982,14 @@ export function MultiGame(props: {
           />
         </View>
         <If when={!match().state.result && !setup()}>
-          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          <View style={{ flexDirection: "row", gap: 5 }}>
             <ConfirmButton
               label="认输"
               confirmLabel="确认认输"
               disabled={!human() || props.kind === "ludo"}
               testID="extra-resign"
+              size="small"
+              grow
               onConfirm={() => {
                 if (human()) finish(followingPlayer(), "认输");
               }}
@@ -893,6 +999,8 @@ export function MultiGame(props: {
                 label="提议和棋"
                 disabled={!human()}
                 testID="extra-draw"
+                size="small"
+                grow
                 onPress={() => drawOffer.set(true)}
               />
             </If>
@@ -902,6 +1010,8 @@ export function MultiGame(props: {
                 testID={
                   props.kind === "chess" ? "chess-claim" : "xiangqi-claim"
                 }
+                size="small"
+                grow
                 disabled={!human() || !drawClaim(match().state as RoyalState)}
                 onPress={() => {
                   const reason = drawClaim(match().state as RoyalState);
@@ -912,24 +1022,35 @@ export function MultiGame(props: {
           </View>
         </If>
         <If when={drawOffer()}>
-          <Text style={{ color: C.ink }}>双方同意才能协议和棋。</Text>
-          <PressButton
-            label={props.mode === "pve" ? "AI仅在均衡残局接受" : "对方接受和棋"}
-            testID="extra-draw-accept"
-            onPress={() => {
-              if (props.mode === "pve") {
-                notice.set("AI暂不接受，继续对局");
-                drawOffer.set(false);
-              } else finish(0, "双方协议和棋");
-            }}
-          />
-          <PressButton label="继续对局" onPress={() => drawOffer.set(false)} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+            <Text style={{ color: C.ink, fontSize: 11, flex: 1 }}>
+              双方同意才能协议和棋。
+            </Text>
+            <PressButton
+              label={props.mode === "pve" ? "AI 判断" : "接受和棋"}
+              testID="extra-draw-accept"
+              size="small"
+              onPress={() => {
+                if (props.mode === "pve") {
+                  notice.set("AI暂不接受，继续对局");
+                  drawOffer.set(false);
+                } else finish(0, "双方协议和棋");
+              }}
+            />
+            <PressButton
+              label="继续对局"
+              size="small"
+              onPress={() => drawOffer.set(false)}
+            />
+          </View>
         </If>
         <If when={props.mode === "aiai" || !!match().state.result}>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          <View style={{ flexDirection: "row", gap: 5 }}>
             <PressButton
               label="上一步"
               testID="extra-prev"
+              size="small"
+              grow
               disabled={(review() ?? actions().length) === 0}
               onPress={() =>
                 review.set(Math.max(0, (review() ?? actions().length) - 1))
@@ -938,6 +1059,8 @@ export function MultiGame(props: {
             <PressButton
               label="下一步"
               testID="extra-next"
+              size="small"
+              grow
               disabled={review() === null || review()! >= actions().length}
               onPress={() =>
                 review.update((n) => Math.min(actions().length, (n ?? 0) + 1))
@@ -946,6 +1069,8 @@ export function MultiGame(props: {
             <PressButton
               label={replaying() ? "停止回放" : "整局回放"}
               testID="extra-replay"
+              size="small"
+              grow
               onPress={() => {
                 if (replaying()) replaying.set(false);
                 else {
@@ -955,8 +1080,10 @@ export function MultiGame(props: {
               }}
             />
             <PressButton
-              label="回到当前局面"
+              label="回到现场"
               testID="extra-current"
+              size="small"
+              grow
               onPress={() => {
                 review.set(null);
                 replaying.set(false);
@@ -965,7 +1092,6 @@ export function MultiGame(props: {
           </View>
         </If>
       </View>
-      </Scroll>
       <If when={menu()}>
         <View
           testID="extra-menu-overlay"

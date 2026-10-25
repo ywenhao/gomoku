@@ -107,7 +107,10 @@ function SoundPlayer(props: {
       volume={1}
       controls={false}
       onEnd={() => playing.set(false)}
-      onError={() => playing.set(false)}
+      onError={() => {
+        console.warn("音效播放失败", props.name);
+        playing.set(false);
+      }}
       accessible={false}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
@@ -124,7 +127,7 @@ function SoundPlayer(props: {
   );
 }
 
-/** 六个隐藏播放器；地址准备好之前什么都不挂，失败时游戏照样能玩。 */
+/** 十个隐藏播放器；地址准备好之前什么都不挂，失败时游戏照样能玩。 */
 export function SoundBank(props: {
   srcs: Accessor<Partial<Record<SoundName, string>>>;
   triggers: Record<SoundName, Accessor<number>>;

@@ -250,6 +250,9 @@ function App() {
     loss: signal(0),
     draw: signal(0),
     check: signal(0),
+    roll: signal(0),
+    capture: signal(0),
+    undo: signal(0),
   };
 
   /* ---------------------------- 派生 ---------------------------- */
@@ -522,6 +525,7 @@ function App() {
       leftMs.set(MOVE_SECONDS * 1000);
       if (kept.length === 0) startedAt.set(0);
     });
+    playSound("undo");
     flash(mode() === "pve" ? `悔棋 −${UNDO_PENALTY} 分` : "已悔棋");
   }
 

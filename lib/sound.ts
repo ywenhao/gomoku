@@ -1,8 +1,10 @@
 /**
  * 游戏音效：启动时用代码合成 WAV，不往仓库里放音频文件，也不加依赖。
  *
- * - 原生：写到应用数据目录，再把绝对路径交给隐藏的 <Video> 播放。
- * - Web：直接生成 Blob URL（浏览器不需要落地文件）。
+ * - 原生：写到应用数据目录，再交给隐藏的 <Video> 播放。桌面端使用裸路径；
+ *   Android / iOS 使用百分号编码的单斜杠 file:/ URI，既满足 MediaPlayer
+ *   对 scheme 的要求，也不会被 NSH 的媒体访问控制当成网络 URL 拒绝。
+ * - Web：直接生成 data URI（浏览器不需要落地文件）。
  *
  * 采样统一为 22.05 kHz / 单声道 / 16-bit PCM —— AVPlayer、MediaPlayer、
  * Media Foundation、GStreamer 和 HTML5 都能直接播。
@@ -23,6 +25,9 @@ export const SOUND_NAMES = [
   "loss",
   "draw",
   "check",
+  "roll",
+  "capture",
+  "undo",
 ] as const;
 
 export type SoundName = (typeof SOUND_NAMES)[number];
@@ -36,6 +41,9 @@ export const SOUND_SECONDS: Record<SoundName, number> = {
   loss: 0.82,
   draw: 0.6,
   check: 1.5119727891156463,
+  roll: 0.35,
+  capture: 0.24,
+  undo: 0.28,
 };
 
 /** 每种音效的峰值音量：落子/胜利用力一点，倒计时滴答轻一点。 */
@@ -47,10 +55,13 @@ const SOUND_PEAK: Record<SoundName, number> = {
   loss: 0.68,
   draw: 0.6,
   check: 1.6,
+  roll: 0.72,
+  capture: 0.88,
+  undo: 0.58,
 };
 
 const TAU = Math.PI * 2;
-const FILE_VERSION = 1;
+const FILE_VERSION = 2;
 
 const clamp = (v: number, lo: number, hi: number) =>
   v < lo ? lo : v > hi ? hi : v;
@@ -167,6 +178,54 @@ function renderLoss(): Float64Array {
   ]);
 }
 
+
+/** 掷骰：木骰在桌面上的连续碰撞。 */
+function renderRoll(n: number): Float64Array {
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SOUND_RATE;
+    const first = Math.exp(-Math.pow((t - 0.018) / 0.018, 2));
+    const second = 0.72 * Math.exp(-Math.pow((t - 0.105) / 0.022, 2));
+    const third = 0.48 * Math.exp(-Math.pow((t - 0.205) / 0.028, 2));
+    const knocks = first + second + third;
+    out[i] =
+      (noise(i * 3) * 0.62 + Math.sin(TAU * 235 * t) * 0.32) *
+      knocks *
+      Math.min(1, t / 0.002);
+  }
+  return out;
+}
+
+/** 吃子：短促木击后接一声低沉的碰撞。 */
+function renderCapture(n: number): Float64Array {
+  const out = new Float64Array(n);
+  let low = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SOUND_RATE;
+    const click = noise(i);
+    low = low * 0.84 + click * 0.16;
+    out[i] =
+      low * Math.exp(-t * 34) * 1.25 +
+      Math.sin(TAU * 132 * t) * Math.exp(-t * 22) * 0.48 +
+      Math.sin(TAU * 690 * t) * Math.exp(-t * 58) * 0.2;
+  }
+  return out;
+}
+
+/** 悔棋：短促的回落音，提示动作已经撤回。 */
+function renderUndo(): Float64Array {
+  const out = new Float64Array(SOUND_SECONDS.undo * SOUND_RATE);
+  const seconds = SOUND_SECONDS.undo;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / SOUND_RATE;
+    const phase = TAU * (620 * t - (310 / (2 * seconds)) * t * t);
+    const env = Math.min(1, t / 0.008) * Math.min(1, (seconds - t) / 0.055);
+    out[i] =
+      (Math.sin(phase) * 0.6 + Math.sin(phase * 2) * 0.14) * env;
+  }
+  return out;
+}
+
 /** 和棋：两声平缓的中音，不带胜负倾向。 */
 function renderDraw(): Float64Array {
   return renderNotes(SOUND_SECONDS.draw, [
@@ -191,6 +250,12 @@ function render(name: SoundName): Float64Array {
       return renderTick(Math.round(SOUND_RATE * 0.1));
     case "draw":
       return renderDraw();
+    case "roll":
+      return renderRoll(Math.round(SOUND_SECONDS.roll * SOUND_RATE));
+    case "capture":
+      return renderCapture(Math.round(SOUND_SECONDS.capture * SOUND_RATE));
+    case "undo":
+      return renderUndo();
   }
 }
 
@@ -293,14 +358,33 @@ export async function soundUrls(): Promise<Partial<Record<SoundName, string>>> {
     try {
       const file = join(dir, `gomoku-${name}-v${FILE_VERSION}.wav`);
       if (!(await exists(file))) await writeFile(file, synthesizeSound(name));
-      // 原生播放器吃绝对路径：file:// 会被 capabilities.network 拒绝
-      // （它只认 http/https/ws/wss），而路径字符串不经过网络检查。
-      urls[name] = file;
+      urls[name] =
+        platform.os === "android" || platform.os === "ios"
+          ? soundFileUri(file)
+          : file;
     } catch {
       /* 没有写权限或文件系统不可用时，这个音效静默跳过 */
     }
   }
   return urls;
+}
+
+/**
+ * 把移动端绝对路径转成 video 播放器可解析的 file:/ URI。
+ * 盘符冒号和路径分隔符保留，其余每一段都做百分号编码，避免空格、中文
+ * 和 Windows 反斜杠在不同平台上被当成参数或非法 URI。这里故意只写一个
+ * 斜杠：NSH 不允许没有 network 能力时加载含 `://` 的地址，而 Android
+ * MediaPlayer 又需要通过 scheme 知道这是本地文件。
+ */
+export function soundFileUri(file: string): string {
+  let path = file.replace(/\\/g, "/");
+  if (path.startsWith("file://")) path = path.slice(7);
+  const encoded = path
+    .split("/")
+    .map((part) => (/^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)))
+    .join("/");
+  if (encoded.startsWith("/")) return `file:${encoded}`;
+  return `file:/${encoded}`;
 }
 
 function encodeBase64(bytes: Uint8Array): string {
@@ -323,7 +407,7 @@ function encodeBase64(bytes: Uint8Array): string {
 
 let pending: Promise<Partial<Record<SoundName, string>>> | null = null;
 
-/** 全局只准备一次音效文件 / Blob URL。 */
+/** 全局只准备一次音效文件 / data URI。 */
 export function loadSounds(): Promise<Partial<Record<SoundName, string>>> {
   if (!pending) pending = soundUrls();
   return pending;

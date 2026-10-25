@@ -21,7 +21,7 @@ export function PressButton(props: {
   hint?: string;
   subLabel?: string;
   testID?: string;
-  size?: "default" | "large";
+  size?: "small" | "default" | "large";
 }) {
   const primary = computed(() => props.tone === "primary");
   return (
@@ -36,8 +36,9 @@ export function PressButton(props: {
       style={{
         flexGrow: props.grow ? 1 : 0,
         flexBasis: props.grow ? 0 : "auto",
-        paddingVertical: props.size === "large" ? 16 : 11,
-        paddingHorizontal: 18,
+        paddingVertical:
+          props.size === "large" ? 16 : props.size === "small" ? 6 : 11,
+        paddingHorizontal: props.size === "small" ? 8 : 18,
         borderRadius: 12,
         backgroundColor: primary() ? C.ink : C.panel,
         borderWidth: primary() ? 0 : 1,
@@ -53,7 +54,8 @@ export function PressButton(props: {
     >
       <Text
         style={{
-          fontSize: props.size === "large" ? 18 : 15,
+          fontSize:
+            props.size === "large" ? 18 : props.size === "small" ? 12 : 15,
           fontWeight: props.size === "large" ? "700" : "600",
           color: primary() ? "#fdfaf3" : C.ink,
         }}
@@ -89,6 +91,7 @@ export function ConfirmButton(props: {
   testID?: string;
   confirmMs?: number;
   disabled?: boolean;
+  size?: "small" | "default" | "large";
 }) {
   const confirming = signal(false);
 
@@ -108,6 +111,7 @@ export function ConfirmButton(props: {
       hint={confirming() ? "再点一次确认" : props.hint}
       tone={props.tone}
       grow={props.grow}
+      size={props.size}
       testID={props.testID}
       onPress={() => {
         if (props.disabled) return;

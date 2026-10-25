@@ -19,7 +19,6 @@ import {
   type CanvasRenderingContext2D,
   type CanvasSize,
 } from "nsh";
-import { Board } from "./Board";
 import { C } from "./ui";
 import { type Match } from "../lib/multigame";
 import { widthOf, heightOf, owner, squareName } from "../lib/royal";
@@ -80,46 +79,111 @@ export function MultiBoard(props: {
     );
     return ownerIndex < 0 ? "#a48b6b" : PLAYER_COLORS[ownerIndex];
   };
-  if (m.kind === "connect6")
+  if (m.kind === "connect6") {
+    const n = 4,
+      cell = () => props.size() / n;
+    const draw = (cx: CanvasRenderingContext2D, s: CanvasSize) => {
+      const c = s.width / n;
+      cx.fillStyle = "#e8c892";
+      cx.fillRect(0, 0, s.width, s.height);
+      cx.strokeStyle = "#8f7654";
+      cx.lineWidth = Math.max(1, s.width / 180);
+      cx.beginPath();
+      for (let i = 0; i < n; i++) {
+        cx.moveTo(c * (i + 0.5), c * 0.5);
+        cx.lineTo(c * (i + 0.5), c * 3.5);
+        cx.moveTo(c * 0.5, c * (i + 0.5));
+        cx.lineTo(c * 3.5, c * (i + 0.5));
+      }
+      cx.stroke();
+    };
     return (
-      <Board
-        n={19}
-        size={props.size}
-        board={() => {
-          const s = props.match().state;
-          return "board" in s ? s.board : [];
+      <View
+        style={{
+          width: props.size(),
+          height: props.size(),
+          borderRadius: 16,
+          overflow: "hidden",
+          backgroundColor: "#e8c892",
         }}
-        stars={[
-          [3, 3],
-          [3, 9],
-          [3, 15],
-          [9, 3],
-          [9, 9],
-          [9, 15],
-          [15, 3],
-          [15, 9],
-          [15, 15],
-        ]}
-        last={() => {
-          const s = props.match().state;
-          if ("moves" in s) {
-            const last = s.moves[s.moves.length - 1];
-            return last ? last.y * 19 + last.x : -1;
-          }
-          return -1;
-        }}
-        winLine={() => {
-          const r = props.match().state.result;
-          return r && "line" in r ? r.line : [];
-        }}
-        hover={() => -1}
-        canPlay={() => !props.disabled}
-        turn={() => Math.min(2, props.match().state.turn) as 1 | 2}
-        onPlay={props.onCell}
-        setHover={() => {}}
-        clearHover={() => {}}
-      />
+      >
+        <Canvas
+          style={{ position: "absolute", width: props.size(), height: props.size() }}
+          draw={draw}
+        />
+        <Each of={Array.from({ length: n * n }, (_, i) => i)}>
+          {(i) => {
+            const value = () => {
+              const state = props.match().state;
+              return "board" in state ? state.board[i()] : 0;
+            };
+            const last = () => {
+              const state = props.match().state;
+              if (!("moves" in state)) return false;
+              const move = state.moves[state.moves.length - 1];
+              return move?.to === i();
+            };
+            const target = () => props.targets().includes(i());
+            return (
+              <View
+                role="button"
+                testID={`extra-cell-${i()}`}
+                accessibilityLabel={`六子冲第${i() + 1}格，${value() ? `玩家${value()}` : "空"}${target() ? "，可走" : ""}`}
+                disabled={props.disabled}
+                onPress={() => props.onCell(i())}
+                style={{
+                  position: "absolute",
+                  left: (i() % n) * cell(),
+                  top: Math.floor(i() / n) * cell(),
+                  width: cell(),
+                  height: cell(),
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: target() ? "rgba(115,156,96,0.34)" : "transparent",
+                }}
+              >
+                <If when={value() !== 0}>
+                  <View
+                    testID={`c6-piece-${i()}-${value() === 1 ? "b" : "w"}`}
+                    style={{
+                      width: cell() * 0.68,
+                      height: cell() * 0.68,
+                      borderRadius: cell() * 0.34,
+                      backgroundColor: value() === 1 ? "#201a15" : "#fffaf0",
+                      borderWidth: 1.5,
+                      borderColor:
+                        props.selected() === i()
+                          ? C.accent
+                          : value() === 1
+                            ? "#080605"
+                            : "#a89a89",
+                      boxShadow:
+                        props.selected() === i()
+                          ? "0 0 0 3px rgba(192,68,44,0.28)"
+                          : "0 2px 5px rgba(48,32,18,0.28)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <If when={last()}>
+                      <View
+                        style={{
+                          width: cell() * 0.16,
+                          height: cell() * 0.16,
+                          borderRadius: cell() * 0.08,
+                          backgroundColor: C.accent,
+                        }}
+                      />
+                    </If>
+                  </View>
+                </If>
+              </View>
+            );
+          }}
+        </Each>
+      </View>
     );
+  }
   if (m.kind === "checkers")
     return (
       <View

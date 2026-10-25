@@ -1,6 +1,10 @@
 /**
- * 六子棋：19 路棋盘，黑棋第一手只下一子，之后每方每手连下两子，
- * 横竖斜先连成六子或更多者胜。规则和胜负判定都是纯函数。
+ * 六子冲（民间又称六儿冲、六门儿）：4×4 棋盘，双方各六子。
+ *
+ * 普通回合沿横线或竖线移动一格；只剩一子时可沿无阻挡直线任意移动，
+ * 称为“独飞”。走子后按二打一、单线二打二（部分地区称单线双顶吃）、
+ * 夹吃与挑吃规则吃子，把对方减到一子或让对方无合法着法即获胜。规则
+ * 函数均不修改入参。
  */
 
 import {
@@ -10,315 +14,362 @@ import {
   type Player,
 } from "./gomoku";
 
-export const C6_SIZE = 19;
-export const C6_WIN = 6;
+export const C6_SIZE = 4;
 export const C6_CELLS = C6_SIZE * C6_SIZE;
+export const C6_PIECES = 6;
+
+/** 玩家 1（黑）与玩家 2（白）的初始六子位置。 */
+export const C6_INITIAL_P1 = [8, 11, 12, 13, 14, 15] as const;
+export const C6_INITIAL_P2 = [0, 1, 2, 3, 4, 7] as const;
 
 export interface C6Move {
-  x: number;
-  y: number;
+  from: number;
+  to: number;
   p: Player;
+  /** 本手吃掉的全部敌子，供界面与棋谱反馈。 */
+  captured?: number[];
+}
+
+export interface C6Result extends GameResult {
+  kind: "win";
+  winner: Player;
+  line: number[];
+  reason: string;
 }
 
 export interface C6State {
   board: number[];
   moves: C6Move[];
   turn: Player;
-  /** 本手还可以下几子：开局黑棋 1，之后 2 */
-  left: number;
-  result: GameResult | null;
+  result: C6Result | null;
 }
 
 export const c6Idx = (x: number, y: number): number => y * C6_SIZE + x;
-
-export function createConnect6(): C6State {
-  return {
-    board: new Array<number>(C6_CELLS).fill(0),
-    moves: [],
-    turn: 1,
-    left: 1,
-    result: null,
-  };
-}
 
 export function c6InBoard(x: number, y: number): boolean {
   return x >= 0 && y >= 0 && x < C6_SIZE && y < C6_SIZE;
 }
 
-const DX = [1, 0, 1, 1] as const;
-const DY = [0, 1, 1, -1] as const;
-
-export function c6WinLine(
-  board: readonly number[],
-  x: number,
-  y: number,
-  p: Player,
-): number[] | null {
-  for (let d = 0; d < 4; d++) {
-    const dx = DX[d];
-    const dy = DY[d];
-    const line: number[] = [c6Idx(x, y)];
-    for (let k = 1; k < C6_WIN + 1; k++) {
-      const nx = x + dx * k;
-      const ny = y + dy * k;
-      if (!c6InBoard(nx, ny) || board[c6Idx(nx, ny)] !== p) break;
-      line.push(c6Idx(nx, ny));
-    }
-    const back: number[] = [];
-    for (let k = 1; k < C6_WIN + 1; k++) {
-      const nx = x - dx * k;
-      const ny = y - dy * k;
-      if (!c6InBoard(nx, ny) || board[c6Idx(nx, ny)] !== p) break;
-      back.unshift(c6Idx(nx, ny));
-    }
-    if (line.length + back.length >= C6_WIN) return back.concat(line);
-  }
-  return null;
+export function createConnect6(): C6State {
+  const board = new Array<number>(C6_CELLS).fill(0);
+  for (const i of C6_INITIAL_P1) board[i] = 1;
+  for (const i of C6_INITIAL_P2) board[i] = 2;
+  return { board, moves: [], turn: 1, result: null };
 }
 
-/** 落一子；非法（越界、占用、已结束）返回 null。 */
-export function playConnect6(
-  state: C6State,
-  x: number,
-  y: number,
-): C6State | null {
-  if (state.result || !c6InBoard(x, y)) return null;
-  const i = c6Idx(x, y);
-  if (state.board[i] !== 0) return null;
+const ORTHO = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const;
 
-  const board = state.board.slice();
-  board[i] = state.turn;
-  const moves = state.moves.concat([{ x, y, p: state.turn }]);
-  const line = c6WinLine(board, x, y, state.turn);
+const otherPlayer = other;
 
-  if (line) {
-    return {
-      board,
-      moves,
-      turn: state.turn,
-      left: 0,
-      result: { kind: "win", winner: state.turn, line },
-    };
-  }
-  if (board.every((v) => v !== 0)) {
-    return {
-      board,
-      moves,
-      turn: state.turn,
-      left: 0,
-      result: { kind: "draw", winner: 0, line: [] },
-    };
-  }
-
-  if (state.left > 1) {
-    return { board, moves, turn: state.turn, left: state.left - 1, result: null };
-  }
-  return {
-    board,
-    moves,
-    turn: other(state.turn),
-    left: 2,
-    result: null,
-  };
+function countPieces(board: readonly number[], p: Player): number {
+  let n = 0;
+  for (const v of board) if (v === p) n++;
+  return n;
 }
 
-export function c6LegalMoves(state: C6State): number[] {
-  if (state.result) return [];
-  const out: number[] = [];
-  for (let i = 0; i < state.board.length; i++) if (state.board[i] === 0) out.push(i);
+/** 从某一格出发的合法落点；独飞时可在整条无阻挡直线上移动。 */
+export function c6LegalMoves(state: C6State, from: number): number[] {
+  if (
+    state.result ||
+    !Number.isInteger(from) ||
+    from < 0 ||
+    from >= C6_CELLS ||
+    state.board[from] !== state.turn
+  )
+    return [];
+  const flying = countPieces(state.board, state.turn) === 1;
+  const x = from % C6_SIZE,
+    y = (from - x) / C6_SIZE,
+    out: number[] = [];
+  for (const [dx, dy] of ORTHO) {
+    for (let step = 1; step < C6_SIZE; step++) {
+      const nx = x + dx * step,
+        ny = y + dy * step;
+      if (!c6InBoard(nx, ny)) break;
+      const i = c6Idx(nx, ny);
+      if (state.board[i] !== 0) break;
+      out.push(i);
+      if (!flying) break;
+    }
+  }
   return out;
 }
 
-/** 棋型分：连子越长、两端越空，分越高。 */
-function pointScore(
-  board: readonly number[],
-  x: number,
-  y: number,
+/**
+ * 二打一要求恰好是「己-己-敌」或「敌-己-己」，且该三格两端紧邻处
+ * 不再有棋子。这样可以排除三己一排、敌-己-己-敌、己-己-敌-敌与
+ * 己-己-敌-己等不应吃子的图形。
+ */
+function isTwoBeatOne(
+  left: number | null,
+  triple: readonly number[],
+  right: number | null,
   p: Player,
-): number {
-  let total = 0;
-  for (let d = 0; d < 4; d++) {
-    const dx = DX[d];
-    const dy = DY[d];
-    let run = 1;
-    let open = 0;
-    for (const sign of [1, -1] as const) {
-      let k = 1;
-      while (k < C6_WIN) {
-        const nx = x + dx * k * sign;
-        const ny = y + dy * k * sign;
-        if (!c6InBoard(nx, ny)) break;
-        const v = board[c6Idx(nx, ny)];
-        if (v === p) {
-          run++;
-          k++;
-          continue;
-        }
-        if (v === 0) open++;
-        break;
-      }
-    }
-    if (run >= C6_WIN) total += 1_000_000;
-    else if (run === 5) total += open > 0 ? 120_000 : 24_000;
-    else if (run === 4) total += open > 0 ? 12_000 : 1_800;
-    else if (run === 3) total += open > 0 ? 900 : 180;
-    else if (run === 2) total += open > 0 ? 90 : 24;
-    else total += open > 0 ? 10 : 2;
-  }
-  return total;
-}
-
-function pairScore(
-  board: number[],
-  a: number,
-  b: number,
-  p: Player,
-): number {
-  const ax = a % C6_SIZE;
-  const ay = (a - ax) / C6_SIZE;
-  const bx = b % C6_SIZE;
-  const by = (b - bx) / C6_SIZE;
-  board[a] = p;
-  const first = pointScore(board, ax, ay, p);
-  board[b] = p;
-  const second = pointScore(board, bx, by, p);
-  board[a] = 0;
-  board[b] = 0;
-  return first + second + (first > 90_000 && second > 90_000 ? 900_000 : 0);
-}
-
-function candidates(state: C6State): number[] {
-  const empty: number[] = [];
-  let stones = 0;
-  for (let i = 0; i < state.board.length; i++) {
-    if (state.board[i] !== 0) stones++;
-  }
-  if (stones === 0) {
-    const center = c6Idx(9, 9);
-    return [center];
-  }
-  for (let y = 0; y < C6_SIZE; y++) {
-    for (let x = 0; x < C6_SIZE; x++) {
-      const i = c6Idx(x, y);
-      if (state.board[i] !== 0) continue;
-      let near = false;
-      for (let dy = -2; dy <= 2 && !near; dy++) {
-        for (let dx = -2; dx <= 2; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          if (!c6InBoard(x + dx, y + dy)) continue;
-          if (state.board[c6Idx(x + dx, y + dy)] !== 0) {
-            near = true;
-            break;
-          }
-        }
-      }
-      if (near) empty.push(i);
-    }
-  }
-  if (empty.length === 0) {
-    for (let i = 0; i < state.board.length; i++) if (state.board[i] === 0) empty.push(i);
-  }
-  return empty;
-}
-
-function pick<T>(list: readonly T[], level: Difficulty): T {
-  if (level === "easy" && list.length > 1) {
-    return list[Math.floor(Math.random() * list.length)];
-  }
-  return list[0];
+  moved: number,
+  line: readonly number[],
+  start: number,
+): number | null {
+  const enemy = otherPlayer(p);
+  const contextClear = (v: number | null) => v === null || v === 0;
+  if (
+    triple[0] === p &&
+    triple[1] === p &&
+    triple[2] === enemy &&
+    (moved === line[start] || moved === line[start + 1]) &&
+    contextClear(left) &&
+    contextClear(right)
+  )
+    return line[start + 2];
+  if (
+    triple[0] === enemy &&
+    triple[1] === p &&
+    triple[2] === p &&
+    (moved === line[start + 1] || moved === line[start + 2]) &&
+    contextClear(left) &&
+    contextClear(right)
+  )
+    return line[start];
+  return null;
 }
 
 /**
- * AI 的一手。黑棋第一手返回 1 个点，其余返回 2 个点。
- * 候选点限制在已有棋子周围，避免 19×19 全盘搜索。
+ * 单线二打二（部分地区称单线双顶吃）：主动排成正好四子相连，己方
+ * 两子相连、敌方两子相连，吃掉相邻的那两枚敌子。四子外侧必须为空
+ * 或棋盘边界。本应用固定采用这一地区变体。
  */
+function doubleBeat(
+  left: number | null,
+  quad: readonly number[],
+  right: number | null,
+  p: Player,
+  moved: number,
+  line: readonly number[],
+  start: number,
+): number[] {
+  const enemy = otherPlayer(p);
+  if ((left !== null && left !== 0) || (right !== null && right !== 0))
+    return [];
+  if (
+    quad[0] === p &&
+    quad[1] === p &&
+    quad[2] === enemy &&
+    quad[3] === enemy &&
+    (moved === line[start] || moved === line[start + 1])
+  )
+    return [line[start + 2], line[start + 3]];
+  if (
+    quad[0] === enemy &&
+    quad[1] === enemy &&
+    quad[2] === p &&
+    quad[3] === p &&
+    (moved === line[start + 2] || moved === line[start + 3])
+  )
+    return [line[start], line[start + 1]];
+  return [];
+}
+
+function captureAfterMove(
+  before: readonly number[],
+  after: readonly number[],
+  moved: number,
+  p: Player,
+): number[] {
+  const enemy = otherPlayer(p),
+    flying = countPieces(before, p) === 1,
+    captured = new Set<number>();
+  const lines: number[][] = [];
+  for (let y = 0; y < C6_SIZE; y++)
+    lines.push(Array.from({ length: C6_SIZE }, (_, x) => c6Idx(x, y)));
+  for (let x = 0; x < C6_SIZE; x++)
+    lines.push(Array.from({ length: C6_SIZE }, (_, y) => c6Idx(x, y)));
+
+  for (const line of lines) {
+    for (let start = 0; start <= C6_SIZE - 4; start++) {
+      const quad = line.slice(start, start + 4).map((i) => after[i]);
+      for (const i of doubleBeat(
+        start > 0 ? after[line[start - 1]] : null,
+        quad,
+        start + 4 < C6_SIZE ? after[line[start + 4]] : null,
+        p,
+        moved,
+        line,
+        start,
+      ))
+        captured.add(i);
+    }
+    for (let start = 0; start <= C6_SIZE - 3; start++) {
+      const cells = line.slice(start, start + 3),
+        triple = cells.map((i) => after[i]),
+        left = start > 0 ? after[line[start - 1]] : null,
+        right = start + 3 < C6_SIZE ? after[line[start + 3]] : null;
+
+      const twoOne = isTwoBeatOne(
+        left,
+        triple,
+        right,
+        p,
+        moved,
+        line,
+        start,
+      );
+      if (twoOne !== null) captured.add(twoOne);
+
+      // 夹吃：己-敌-己，外侧至少一处为空，吃中间一子。
+      if (
+        triple[0] === p &&
+        triple[1] === enemy &&
+        triple[2] === p &&
+        (moved === cells[0] || moved === cells[2]) &&
+        (left === 0 || right === 0)
+      )
+        captured.add(cells[1]);
+
+      // 挑吃：独飞插到两枚敌子中间，同时吃掉两端。
+      if (
+        flying &&
+        triple[0] === enemy &&
+        triple[1] === p &&
+        triple[2] === enemy &&
+        moved === cells[1] &&
+        (left === 0 || right === 0)
+      ) {
+        captured.add(cells[0]);
+        captured.add(cells[2]);
+      }
+    }
+  }
+  return [...captured].sort((a, b) => a - b);
+}
+
+function legalMovesFor(
+  board: readonly number[],
+  p: Player,
+  from: number,
+): number[] {
+  if (
+    !Number.isInteger(from) ||
+    from < 0 ||
+    from >= C6_CELLS ||
+    board[from] !== p
+  )
+    return [];
+  const flying = countPieces(board, p) === 1;
+  const x = from % C6_SIZE,
+    y = (from - x) / C6_SIZE,
+    out: number[] = [];
+  for (const [dx, dy] of ORTHO) {
+    for (let step = 1; step < C6_SIZE; step++) {
+      const nx = x + dx * step,
+        ny = y + dy * step;
+      if (!c6InBoard(nx, ny)) break;
+      const i = c6Idx(nx, ny);
+      if (board[i] !== 0) break;
+      out.push(i);
+      if (!flying) break;
+    }
+  }
+  return out;
+}
+
+function hasAnyMove(board: readonly number[], p: Player): boolean {
+  for (let from = 0; from < C6_CELLS; from++)
+    if (board[from] === p && legalMovesFor(board, p, from).length) return true;
+  return false;
+}
+
+/** 执行一步；非法走法、占用落点或已结束对局返回 null。 */
+export function moveConnect6(
+  state: C6State,
+  from: number,
+  to: number,
+): C6State | null {
+  if (
+    state.result ||
+    !Number.isInteger(from) ||
+    !Number.isInteger(to) ||
+    !legalMovesFor(state.board, state.turn, from).includes(to)
+  )
+    return null;
+
+  const p = state.turn,
+    board = state.board.slice();
+  board[from] = 0;
+  board[to] = p;
+  const captured = captureAfterMove(state.board, board, to, p);
+  for (const i of captured) board[i] = 0;
+
+  const opponent = otherPlayer(p),
+    opponentCount = countPieces(board, opponent),
+    won = opponentCount <= 1 || !hasAnyMove(board, opponent),
+    moves = state.moves.concat([{ from, to, p, captured }]);
+  if (won)
+    return {
+      board,
+      moves,
+      turn: p,
+      result: {
+        kind: "win",
+        winner: p,
+        line: captured.slice(),
+        reason: opponentCount <= 1 ? "对方仅剩一子" : "对方无棋可走",
+      },
+    };
+  return { board, moves, turn: opponent, result: null };
+}
+
+/** 当前行棋方的全部合法着法，供 AI 与测试使用。 */
+export function c6AllMoves(state: C6State): { from: number; to: number }[] {
+  if (state.result) return [];
+  const out: { from: number; to: number }[] = [];
+  for (let from = 0; from < C6_CELLS; from++)
+    if (state.board[from] === state.turn)
+      for (const to of c6LegalMoves(state, from)) out.push({ from, to });
+  return out;
+}
+
+/** 简单但会优先立即获胜和吃子的 AI。 */
 export function connect6Ai(
   state: C6State,
-  level: Difficulty = "normal",
-): { x: number; y: number }[] {
-  if (state.result) return [];
-  const pool = candidates(state);
-  if (pool.length === 0) return [];
-  if (state.left === 1) {
-    pool.sort(
-      (a, b) =>
-        pointScore(state.board, b % C6_SIZE, (b - (b % C6_SIZE)) / C6_SIZE, state.turn) -
-        pointScore(state.board, a % C6_SIZE, (a - (a % C6_SIZE)) / C6_SIZE, state.turn),
-    );
-    const i = pick(pool, level);
-    return [{ x: i % C6_SIZE, y: (i - (i % C6_SIZE)) / C6_SIZE }];
-  }
+  level: Difficulty,
+): { from: number; to: number } | null {
+  const choices = c6AllMoves(state);
+  if (!choices.length) return null;
+  if (level === "easy")
+    return choices[Math.floor(Math.random() * choices.length)];
 
-  const enemy = other(state.turn);
-  const scored: { a: number; b: number; score: number }[] = [];
-  for (let i = 0; i < pool.length; i++) {
-    const a = pool[i];
-    if (state.board[a] !== 0) continue;
-    const ax = a % C6_SIZE;
-    const ay = (a - ax) / C6_SIZE;
-    // 单点已经能成六，直接带一个相邻空点
-    state.board[a] = state.turn;
-    const win = c6WinLine(state.board, ax, ay, state.turn);
-    state.board[a] = 0;
-    if (win) {
-      const b = pool.find((j) => j !== a) ?? a;
-      return [
-        { x: ax, y: ay },
-        { x: b % C6_SIZE, y: (b - (b % C6_SIZE)) / C6_SIZE },
-      ];
+  const p = state.turn,
+    enemy = otherPlayer(p);
+  const scored = choices.map((choice) => {
+    const next = moveConnect6(state, choice.from, choice.to)!,
+      captures = next.moves[next.moves.length - 1].captured?.length ?? 0,
+      enemyMoves = c6AllMoves({ ...next, turn: enemy, result: null });
+    let danger = 0;
+    for (const move of enemyMoves) {
+      const reply = moveConnect6(
+        { ...next, turn: enemy, result: null },
+        move.from,
+        move.to,
+      );
+      const amount = reply?.moves[reply.moves.length - 1].captured?.length ?? 0;
+      if (amount > danger) danger = amount;
     }
-  }
-
-  const limit = level === "easy" ? 12 : level === "normal" ? 28 : 48;
-  const small = pool.slice(0, limit);
-  for (let i = 0; i < small.length; i++) {
-    for (let j = i + 1; j < small.length; j++) {
-      const a = small[i];
-      const b = small[j];
-      const attack = pairScore(state.board.slice(), a, b, state.turn);
-      const defend = pairScore(state.board.slice(), a, b, enemy);
-      let score = attack + defend * (level === "hell" ? 1.05 : 0.72);
-      if (level === "easy") score += Math.random() * 4_000;
-      scored.push({ a, b, score });
-    }
-  }
-  scored.sort((x, y) => y.score - x.score);
-
-  // 地狱档：在前几个组合里再看一眼对手的最佳回应，选最不让对手成六的
-  if (level === "hell" && scored.length > 1) {
-    const top = scored.slice(0, 5);
-    for (const item of top) {
-      const board = state.board.slice();
-      board[item.a] = state.turn;
-      board[item.b] = state.turn;
-      let bestReply = 0;
-      for (const i of pool) {
-        if (board[i] !== 0) continue;
-        const x = i % C6_SIZE;
-        const y = (i - x) / C6_SIZE;
-        bestReply = Math.max(bestReply, pointScore(board, x, y, enemy));
-      }
-      item.score -= bestReply * 0.9;
-    }
-    top.sort((x, y) => y.score - x.score);
-    const best = top[0] ?? scored[0];
-    return [
-      { x: best.a % C6_SIZE, y: (best.a - (best.a % C6_SIZE)) / C6_SIZE },
-      { x: best.b % C6_SIZE, y: (best.b - (best.b % C6_SIZE)) / C6_SIZE },
-    ];
-  }
-
-  const best = scored[0];
-  if (!best) {
-    const a = pool[0];
-    const b = pool[1] ?? pool[0];
-    return [
-      { x: a % C6_SIZE, y: (a - (a % C6_SIZE)) / C6_SIZE },
-      { x: b % C6_SIZE, y: (b - (b % C6_SIZE)) / C6_SIZE },
-    ];
-  }
-  return [
-    { x: best.a % C6_SIZE, y: (best.a - (best.a % C6_SIZE)) / C6_SIZE },
-    { x: best.b % C6_SIZE, y: (best.b - (best.b % C6_SIZE)) / C6_SIZE },
-  ];
+    const x = choice.to % C6_SIZE,
+      y = Math.floor(choice.to / C6_SIZE),
+      center = 3 - (Math.abs(1.5 - x) + Math.abs(1.5 - y));
+    const score =
+      (next.result?.winner === p ? 1_000_000 : 0) +
+      captures * 4_000 +
+      (captures ? 800 : 0) -
+      danger * 1_200 -
+      enemyMoves.length * 8 +
+      center * 6;
+    return { choice, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].choice;
 }

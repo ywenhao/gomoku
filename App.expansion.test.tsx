@@ -26,43 +26,50 @@ test("八棋种都有独立首页入口、规则与教学", async () => {
     await app.waitUntil(() => !app.shows("id:help-panel"));
   }
 });
-test("六子棋双子回合共用时限，存档恢复与棋谱重放", async () => {
+test("六子冲走子、存档恢复与棋谱重放", async () => {
   const app = await launch();
   await app.press("id:seg-game-connect6");
   await app.press("id:seg-pvp");
   await app.press("id:home-new");
   await app.waitFor("id:connect6-screen");
-  await app.waitFor("id:cell-9-9");
-  await app.waitUntil(() => app.enabled("id:cell-9-9"));
-  await app.press("id:cell-9-9");
-  await app.waitFor("id:stone-9-9-b");
+  await app.waitFor("id:extra-cell-8");
+  await app.press("id:extra-cell-8");
+  await app.press("id:extra-cell-9");
+  await app.waitFor("id:c6-piece-9-b");
   expect(has(app, "玩家2")).toBe(true);
-  await app.clock.runFor(10000);
-  await app.press("id:cell-8-9");
-  expect(has(app, "本回合剩1子")).toBe(true);
-  expect(has(app, "0:20")).toBe(true);
-  await app.press("id:cell-10-9");
-  expect(has(app, "本回合剩2子")).toBe(true);
+  await app.press("id:extra-cell-4");
+  await app.press("id:extra-cell-5");
+  await app.waitFor("id:c6-piece-5-w");
+  await app.waitUntil(() => !app.shows("id:c6-piece-9-b"));
   await app.press("id:extra-record");
   await app.press("id:extra-back");
   await app.waitFor("id:home-continue");
-  expect(has(app, "六子棋")).toBe(true);
-  const again = await open("./App.tsx", { storage: app.storage(), clock: {} });
+  expect(has(app, "六子冲")).toBe(true);
+  const saved = JSON.parse(app.storage()["gomoku.game.v1"]);
+  expect(saved.actions.length).toBe(2);
+  const again = await open("./App.tsx", {
+    storage: app.storage(),
+    clock: {},
+    width: 390,
+    height: 844,
+  });
   await again.waitFor("id:home-continue");
   await again.press("id:home-continue");
   await again.waitFor("id:connect6-screen");
-  expect(again.shows("id:stone-9-9-b")).toBe(true);
-  expect(again.shows("id:stone-8-9-w")).toBe(true);
+  await again.waitFor("id:c6-piece-5-w");
+  await again.waitFor("id:c6-piece-11-b");
+  expect(again.shows("id:c6-piece-9-b")).toBe(false);
   await again.press("id:extra-back");
   await again.press("id:home-records");
   const records = JSON.parse(again.storage()["gomoku.records.v1"]);
   await again.press(`id:record-open-${records[0].id}`);
   await again.waitFor("id:record-view");
   await again.press("id:record-first");
-  expect(has(again, "第 0 / 3 步")).toBe(true);
+  expect(has(again, "第 0 / 2 步")).toBe(true);
   await again.press("id:record-next");
-  expect(has(again, "第 1 / 3 步")).toBe(true);
+  expect(has(again, "第 1 / 2 步")).toBe(true);
 });
+
 test("国际象棋累计棋钟、加秒、菜单暂停、超时判负", async () => {
   const app = await launch();
   await app.press("id:seg-game-chess");
@@ -115,6 +122,44 @@ test("军棋布阵及双人暗棋交接，跳棋和飞行棋可开始", async ()
   await app.press("id:ludo-roll");
   expect(has(app, "骰子") || has(app, "玩家2")).toBe(true);
 });
+test("320×568 小屏军旗对局保持一屏，关键操作与棋盘都在场", async () => {
+  const app = await open("./App.tsx", {
+    storage: {},
+    clock: {},
+    width: 320,
+    height: 568,
+    safeArea: { top: 24, bottom: 16 },
+    platform: "android",
+  });
+  await app.press("id:seg-game-junqi");
+  await app.press("id:seg-pvp");
+  await app.press("id:home-new");
+  await app.waitFor("id:junqi-screen");
+  for (let i = 0; i < 60; i++)
+    expect(app.shows(`id:extra-cell-${i}`)).toBe(true);
+  expect(app.shows("id:junqi-ready")).toBe(true);
+
+  await app.press("id:junqi-ready");
+  await app.press("id:junqi-handoff");
+  await app.press("id:junqi-ready");
+  await app.press("id:junqi-handoff");
+
+  for (const id of [
+    "extra-undo",
+    "extra-pause",
+    "extra-record",
+    "extra-back",
+    "extra-resign",
+    "extra-draw",
+  ])
+    expect(app.shows(`id:${id}`)).toBe(true);
+  for (let i = 0; i < 60; i++)
+    expect(app.shows(`id:extra-cell-${i}`)).toBe(true);
+
+  // 对局页不是滚动容器；整页滚动会破坏棋盘与操作区的沉浸感。
+  await expect(() => app.scroll("id:junqi-screen", 300)).rejects.toThrow();
+});
+
 test("五子棋教学有引导与测验，两个象棋都有大量可筛选残局", async () => {
   const app = await launch();
   await app.press("id:home-learn");

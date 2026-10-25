@@ -291,7 +291,18 @@ test("双人模式菜单打开时倒计时也暂停", async () => {
 test("Web 上会挂载隐藏音效播放器", async () => {
   const app = await fresh({ platform: "web" });
   await app.waitFor("id:sound-place");
-  for (const name of ["place", "tick", "timeout", "win", "loss", "draw"]) {
+  for (const name of [
+    "place",
+    "tick",
+    "timeout",
+    "win",
+    "loss",
+    "draw",
+    "check",
+    "roll",
+    "capture",
+    "undo",
+  ]) {
     expect(app.count(`id:sound-${name}`)).toBe(1);
   }
   // 触发一次落子音效，确认隐藏播放器不会把对局弄崩

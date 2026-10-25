@@ -3,17 +3,21 @@ import { C, PressButton } from "./ui";
 import { GAMES, gameName } from "../lib/catalog";
 import { GUIDES } from "../lib/guides";
 import type { GameKind } from "../lib/gomoku";
-export function GuideStrip(props: { kind: GameKind }) {
+export function GuideStrip(props: {
+  kind: GameKind;
+  defaultOpen?: boolean;
+  compact?: boolean;
+}) {
   const step = signal(0),
-    open = signal(true);
+    open = signal(props.defaultOpen ?? true);
   return (
     <View
       testID={`guide-${props.kind}`}
       style={{
         backgroundColor: C.panel,
         borderRadius: 12,
-        padding: 10,
-        gap: 6,
+        padding: props.compact ? 6 : 10,
+        gap: props.compact ? 4 : 6,
       }}
     >
       <View
@@ -21,13 +25,25 @@ export function GuideStrip(props: { kind: GameKind }) {
         role="button"
         testID="guide-toggle"
       >
-        <Text style={{ color: C.accent, fontSize: 12, fontWeight: "600" }}>
+        <Text
+          style={{
+            color: C.accent,
+            fontSize: props.compact ? 10 : 12,
+            fontWeight: "600",
+          }}
+        >
           操作引导 · {step() + 1}/{GUIDES[props.kind].steps.length} ·{" "}
           {open() ? "收起" : "展开"}
         </Text>
       </View>
       <If when={open()}>
-        <Text style={{ color: C.ink, fontSize: 12, lineHeight: 19 }}>
+        <Text
+          style={{
+            color: C.ink,
+            fontSize: props.compact ? 11 : 12,
+            lineHeight: props.compact ? 17 : 19,
+          }}
+        >
           {GUIDES[props.kind].steps[step()]}
         </Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
@@ -36,6 +52,7 @@ export function GuideStrip(props: { kind: GameKind }) {
             disabled={step() === 0}
             onPress={() => step.update((v) => v - 1)}
             testID="guide-prev"
+            size={props.compact ? "small" : "default"}
           />
           <PressButton
             label={
@@ -44,6 +61,7 @@ export function GuideStrip(props: { kind: GameKind }) {
                 : "下一步"
             }
             testID="guide-next"
+            size={props.compact ? "small" : "default"}
             onPress={() => {
               if (step() === GUIDES[props.kind].steps.length - 1)
                 open.set(false);

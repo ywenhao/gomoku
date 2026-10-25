@@ -1,134 +1,178 @@
 import { expect, test } from "nsh/test";
 import {
-  C6_WIN,
-  c6Idx,
-  c6InBoard,
+  C6_CELLS,
+  C6_INITIAL_P1,
+  C6_INITIAL_P2,
+  C6_SIZE,
+  c6AllMoves,
+  c6LegalMoves,
   connect6Ai,
   createConnect6,
-  playConnect6,
+  moveConnect6,
   type C6State,
 } from "./connect6";
+import type { Player } from "./gomoku";
 
-function put(state: C6State, cells: [number, number][], p: 1 | 2): C6State {
-  const board = state.board.slice();
-  for (const [x, y] of cells) board[c6Idx(x, y)] = p;
-  return { ...state, board };
+function position(
+  ones: number[] = [],
+  twos: number[] = [],
+  turn: Player = 1,
+): C6State {
+  const board = new Array<number>(C6_CELLS).fill(0);
+  for (const i of ones) board[i] = 1;
+  for (const i of twos) board[i] = 2;
+  return { board, moves: [], turn, result: null };
 }
 
-test("六子棋开局棋盘 19 路且黑棋第一手只能一子", () => {
-  const start = createConnect6();
-  expect(start.board.length).toBe(19 * 19);
-  expect(start.turn).toBe(1);
-  expect(start.left).toBe(1);
+function lastCaptured(s: C6State | null): number[] {
+  return s?.moves[s.moves.length - 1]?.captured ?? [];
+}
 
-  const one = playConnect6(start, 9, 9);
-  expect(one).not.toBe(null);
-  expect(one!.turn).toBe(2);
-  expect(one!.left).toBe(2);
-
-  // 白棋连下两子
-  const two = playConnect6(one!, 8, 8);
-  expect(two!.turn).toBe(2);
-  expect(two!.left).toBe(1);
-  const three = playConnect6(two!, 10, 10);
-  expect(three!.turn).toBe(1);
-  expect(three!.left).toBe(2);
+test("六子冲使用 4×4 棋盘，双方各六子且黑先", () => {
+  const s = createConnect6();
+  expect(C6_SIZE).toBe(4);
+  expect(C6_CELLS).toBe(16);
+  expect(s.board.length).toBe(16);
+  expect(s.turn).toBe(1);
+  expect(s.board.filter((v) => v === 1).length).toBe(6);
+  expect(s.board.filter((v) => v === 2).length).toBe(6);
+  for (const i of C6_INITIAL_P1) expect(s.board[i]).toBe(1);
+  for (const i of C6_INITIAL_P2) expect(s.board[i]).toBe(2);
 });
 
-test("六子棋不能下在已占用或越界的位置", () => {
-  const start = createConnect6();
-  const one = playConnect6(start, 9, 9)!;
-  expect(playConnect6(one, 9, 9)).toBe(null);
-  expect(playConnect6(one, -1, 5)).toBe(null);
-  expect(playConnect6(one, 19, 5)).toBe(null);
-  expect(c6InBoard(0, 0)).toBe(true);
-  expect(c6InBoard(18, 18)).toBe(true);
-  expect(c6InBoard(19, 18)).toBe(false);
+test("普通走法只能沿横竖相邻空格移动", () => {
+  const s = createConnect6();
+  expect(c6LegalMoves(s, 8)).toEqual([9]);
+  expect(c6LegalMoves(s, 13)).toEqual([9]);
+  expect(c6LegalMoves(s, 12)).toEqual([]);
+  expect(moveConnect6(s, 8, 9)).not.toBe(null);
+  expect(moveConnect6(s, 8, 10)).toBe(null);
+  expect(moveConnect6(s, 8, 12)).toBe(null);
+  expect(moveConnect6(s, 8, 7)).toBe(null);
+  expect(moveConnect6(s, 8, 8)).toBe(null);
+  expect(moveConnect6(s, 9, 8)).toBe(null);
 });
 
-test("六连（含超过六子）判胜并返回连线", () => {
-  for (const [dx, dy] of [
-    [1, 0],
-    [0, 1],
-    [1, 1],
-    [1, -1],
-  ] as const) {
-    let state = createConnect6();
-    state = put(state, [], 1);
-    state = put(state, Array.from({ length: C6_WIN }, (_, i) => [5 + dx * i, 5 + dy * i]) as [number, number][], 1);
-    // 黑棋下一子只是在别处走，此时已经提前成六；用 play 检查最后落子
-    const target = state;
-    const last = playConnect6(
-      { ...target, board: target.board.map((v, i) => (i === c6Idx(5 + dx * 5, 5 + dy * 5) ? 0 : v)) },
-      5 + dx * 5,
-      5 + dy * 5,
-    );
-    expect(last?.result?.kind).toBe("win");
-    expect(last?.result?.winner).toBe(1);
-    expect(last?.result?.line.length).toBeGreaterThanOrEqual(C6_WIN);
-  }
+test("越界、非己方棋子和已结束局面不能走", () => {
+  const s = createConnect6();
+  expect(moveConnect6(s, -1, 9)).toBe(null);
+  expect(moveConnect6(s, 8, 16)).toBe(null);
+  expect(moveConnect6(s, 0, 5)).toBe(null);
+  const ended: C6State = {
+    ...s,
+    result: { kind: "win", winner: 1, line: [], reason: "测试" },
+  };
+  expect(c6LegalMoves(ended, 8)).toEqual([]);
+  expect(moveConnect6(ended, 8, 9)).toBe(null);
 });
 
-test("六子棋长连也判胜", () => {
-  let state = createConnect6();
-  const board = state.board.slice();
-  for (let x = 3; x < 3 + 7; x++) board[c6Idx(x, 4)] = 1;
-  state = { ...state, board, turn: 1, left: 2 };
-  // 最后补一子在第 10 列；之前 7 子已经存在（正常对局不可能，但规则上应判胜）
-  board[c6Idx(9, 4)] = 0;
-  state = { ...state, board };
-  const next = playConnect6(state, 9, 4);
-  expect(next?.result?.kind).toBe("win");
-  expect(next?.result?.line.length).toBe(7);
+test("只剩一子时可以独飞，但不能越过棋子", () => {
+  const open = position([0], [5, 10]);
+  expect(c6LegalMoves(open, 0)).toEqual([1, 2, 3, 4, 8, 12]);
+  const blocked = position([0], [1, 5, 10]);
+  expect(c6LegalMoves(blocked, 0)).toEqual([4, 8, 12]);
+  expect(moveConnect6(blocked, 0, 2)).toBe(null);
 });
 
-test("棋盘下满且无人连六判和", () => {
-  const start = createConnect6();
-  const board: number[] = start.board.map((_, i) => {
-    const x = i % 19;
-    const y = (i - x) / 19;
-    return (x + 2 * y) % 4 < 2 ? 1 : 2;
-  });
-  // 留一个空位让黑棋落最后一子，并保证不会连六：棋盘按斜条纹填充本身没有六连
-  board[c6Idx(18, 18)] = 0;
-  const almost: C6State = { ...start, board, turn: 1, left: 1 };
-  const done = playConnect6(almost, 18, 18);
-  expect(done).not.toBe(null);
-  expect(done!.result?.kind).toBe("draw");
+test("二打一吃与己方两子相邻的敌子", () => {
+  const s = position([1, 4], [2, 6, 10]);
+  const next = moveConnect6(s, 4, 0)!;
+  expect(lastCaptured(next)).toEqual([2]);
+  expect(next.board[2]).toBe(0);
+  expect(next.turn).toBe(2);
+  expect(next.result).toBe(null);
 });
 
-test("AI 立刻补成六", () => {
-  const start = createConnect6();
-  const board = start.board.slice();
-  for (let x = 4; x <= 8; x++) board[c6Idx(x, 6)] = 1;
-  const state: C6State = { ...start, board, turn: 1, left: 2 };
-  const plan = connect6Ai(state, "hell");
-  expect(plan.length).toBe(2);
-  const first = plan[0];
-  const after = playConnect6(state, first.x, first.y);
-  expect(after?.result?.kind).toBe("win");
+test("二打一也识别反向的敌-己-己", () => {
+  const s = position([5, 8], [0, 10]);
+  const next = moveConnect6(s, 5, 4)!;
+  expect(lastCaptured(next)).toEqual([0]);
 });
 
-test("AI 在空棋盘落天元，合法且不重复", () => {
-  const start = createConnect6();
-  const plan = connect6Ai(start, "normal");
-  expect(plan).toEqual([{ x: 9, y: 9 }]);
-  const next = playConnect6(start, plan[0].x, plan[0].y)!;
-  const reply = connect6Ai(next, "normal");
-  expect(reply.length).toBe(2);
-  expect(reply[0]).not.toEqual(reply[1]);
-  for (const p of reply) {
-    expect(next.board[c6Idx(p.x, p.y)]).toBe(0);
-  }
+test("三己一排与三种错误相邻图形都不能吃子", () => {
+  const three = position([0, 1, 2], [6, 10]);
+  expect(lastCaptured(moveConnect6(three, 2, 3))).toEqual([]);
+
+  const blockedDouble = position([1, 4], [3, 6, 7, 10]);
+  expect(lastCaptured(moveConnect6(blockedDouble, 4, 5))).toEqual([]);
+
+  const enemiesBothEnds = position([4, 5, 12], [3, 6, 10]);
+  expect(lastCaptured(moveConnect6(enemiesBothEnds, 12, 8))).toEqual([]);
+
+  const ownBehind = position([0, 3, 4], [2, 10]);
+  expect(lastCaptured(moveConnect6(ownBehind, 4, 1))).toEqual([]);
 });
 
-test("AI 会挡对手的五连", () => {
-  const start = createConnect6();
-  const board = start.board.slice();
-  for (let x = 4; x <= 8; x++) board[c6Idx(x, 8)] = 1;
-  const state: C6State = { ...start, board, turn: 2, left: 2 };
-  const plan = connect6Ai(state, "hell");
-  expect(plan.length).toBe(2);
-  const spots = plan.map((p) => c6Idx(p.x, p.y));
-  expect(spots.includes(c6Idx(3, 8)) || spots.includes(c6Idx(9, 8))).toBe(true);
+test("夹吃己-敌-己且至少一端为空", () => {
+  const s = position([0, 12], [4, 10]);
+  const next = moveConnect6(s, 12, 8)!;
+  expect(lastCaptured(next)).toEqual([4]);
+  expect(next.board[4]).toBe(0);
+});
+
+test("夹吃两端都没有空位时不能吃", () => {
+  const s = position([0, 4], [1, 3, 10]);
+  expect(lastCaptured(moveConnect6(s, 4, 2))).toEqual([]);
+});
+
+test("独飞插入两敌之间触发挑吃，吃掉两端", () => {
+  const s = position([5], [0, 2, 10]);
+  const next = moveConnect6(s, 5, 1)!;
+  expect(lastCaptured(next)).toEqual([0, 2]);
+  expect(next.board[0]).toBe(0);
+  expect(next.board[2]).toBe(0);
+});
+
+test("挑吃要求插入点至少一端为空", () => {
+  const s = position([5], [0, 2, 3, 10]);
+  expect(lastCaptured(moveConnect6(s, 5, 1))).toEqual([]);
+});
+
+test("单线二打二（双顶吃）吃掉相邻的两枚敌子", () => {
+  const s = position([0, 5], [8, 12]);
+  const next = moveConnect6(s, 5, 4)!;
+  expect(lastCaptured(next)).toEqual([8, 12]);
+  expect(next.board[8]).toBe(0);
+  expect(next.board[12]).toBe(0);
+});
+
+test("同一步多方向吃子会去重合并", () => {
+  const s = position([4, 6, 9], [7, 13]);
+  const next = moveConnect6(s, 4, 5)!;
+  expect(next).not.toBe(null);
+  expect(lastCaptured(next)).toEqual([7, 13]);
+});
+
+test("把对方棋子减到一枚立即获胜", () => {
+  const s = position([1, 4], [2, 10]);
+  const next = moveConnect6(s, 4, 0)!;
+  expect(next.result?.winner).toBe(1);
+  expect(next.result?.reason).toBe("对方仅剩一子");
+});
+
+test("让对方无合法着法也立即获胜", () => {
+  const s = position([1, 4, 5, 11, 14], [0, 15]);
+  const next = moveConnect6(s, 5, 6)!;
+  expect(next.result?.winner).toBe(1);
+  expect(next.result?.reason).toBe("对方无棋可走");
+});
+
+test("AI 返回合法着法并能找到立即吃子", () => {
+  const s = position([1, 4], [2, 10]);
+  const choice = connect6Ai(s, "hell")!;
+  expect(
+    c6AllMoves(s).some(
+      (m) => m.from === choice.from && m.to === choice.to,
+    ),
+  ).toBe(true);
+  expect(choice).toEqual({ from: 4, to: 0 });
+});
+
+test("AI 在初始局面也有合法走法", () => {
+  const s = createConnect6();
+  const choice = connect6Ai(s, "normal");
+  expect(choice).not.toBe(null);
+  expect(moveConnect6(s, choice!.from, choice!.to)).not.toBe(null);
+  expect(choice!.from).toBeGreaterThanOrEqual(0);
+  expect(choice!.from).toBeLessThan(C6_CELLS);
 });

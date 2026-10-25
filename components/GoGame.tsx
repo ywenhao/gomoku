@@ -360,7 +360,7 @@ export function GoGame(props: {
       reviewAt.set(null);
       replaying.set(false);
     });
-    props.playSound("place");
+    props.playSound(r.captured.length > 0 ? "capture" : "place");
   }
 
   function doPass() {
@@ -491,6 +491,7 @@ export function GoGame(props: {
       leftMs.set(MOVE_SECONDS * 1000);
       if (kept.length === 0) startedAt.set(0);
     });
+    props.playSound("undo");
     flash(mode() === "pve" ? "已退回上一手" : "已悔棋");
   }
 
