@@ -1701,6 +1701,7 @@ function App() {
         </If>
         <If when={screen() === "endgames"}>
           <Endgames
+            playSound={playSound}
             initial={kind() === "xiangqi" ? "xiangqi" : "chess"}
             solved={study().tsumego}
             onSolved={solveTsumego}

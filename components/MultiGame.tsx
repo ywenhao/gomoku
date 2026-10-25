@@ -319,7 +319,7 @@ export function MultiGame(props: {
       if (!v || (v > 0 ? 1 : 2) !== p) return;
       if (selected() < 0) {
         selected.set(i);
-        props.playSound("tick");
+        props.playSound("select");
         return;
       }
       const board = m.state.board.slice();
@@ -327,7 +327,7 @@ export function MultiGame(props: {
       if (validDeployment(board, p as Player)) {
         match.set({ ...m, state: { ...m.state, board } });
         notice.set("布阵已调整");
-        props.playSound("tick");
+        props.playSound("select");
       } else
         notice.set("非法布阵：军旗须在大本营，地雷在后两排，炸弹不得在前排");
       selected.set(-1);
@@ -347,7 +347,7 @@ export function MultiGame(props: {
               : 0;
     if (p === turn()) {
       selected.set(selected() === i ? -1 : i);
-      props.playSound(m.kind === "connect6" ? "select" : "tick");
+      props.playSound("select");
       return;
     }
     if (!targets().includes(i)) {
@@ -782,7 +782,7 @@ export function MultiGame(props: {
                 size="small"
                 onPress={() => {
                   handoff.set(false);
-                  props.playSound("tick");
+                  props.playSound("select");
                   clock.update((c) => ({ ...c, lastAt: Date.now() }));
                 }}
               />
@@ -801,7 +801,7 @@ export function MultiGame(props: {
                 !validDeployment(m.state.board, setup() as Player)
               )
                 return;
-              props.playSound("tick");
+              props.playSound("select");
               selected.set(-1);
               if (props.mode === "pvp" && setup() === 1) {
                 setup.set(2);

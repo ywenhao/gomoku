@@ -20,11 +20,13 @@ import {
 } from "../lib/royal";
 import { type Match } from "../lib/multigame";
 import { gameName } from "../lib/catalog";
+import type { SoundName } from "../lib/sound";
 export function Endgames(props: {
   initial: RoyalKind;
   solved: string[];
   onSolved: (id: string) => void;
   onBack: () => void;
+  playSound?: (name: SoundName) => void;
 }) {
   const credits = signal(false);
   const kind = signal<RoyalKind>(props.initial),
@@ -92,6 +94,7 @@ export function Endgames(props: {
     if (p === s.state.turn) {
       selected.set(i);
       hint.set(null);
+      props.playSound?.("select");
       return;
     }
     if (

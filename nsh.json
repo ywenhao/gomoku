@@ -1,8 +1,8 @@
 {
   "name": "弈境",
   "id": "com.gomoku.app",
-  "version": "1.5.11",
-  "build": 17,
+  "version": "1.5.12",
+  "build": 18,
   "icon": "icon.png",
   "appearance": "light",
   "capabilities": {

@@ -42,7 +42,7 @@ export const SOUND_SECONDS: Record<SoundName, number> = {
   win: 0.78,
   loss: 0.82,
   draw: 0.6,
-  check: 0.9243537414965987,
+  check: 0.48086167800453516,
   roll: 0.35,
   capture: 0.24,
   undo: 0.28,
@@ -64,7 +64,7 @@ const SOUND_PEAK: Record<SoundName, number> = {
 };
 
 const TAU = Math.PI * 2;
-const FILE_VERSION = 3;
+const FILE_VERSION = 4;
 
 const clamp = (v: number, lo: number, hi: number) =>
   v < lo ? lo : v > hi ? hi : v;
