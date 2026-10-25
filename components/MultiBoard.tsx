@@ -141,9 +141,20 @@ export function MultiBoard(props: {
                   height: cell(),
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: target() ? "rgba(115,156,96,0.34)" : "transparent",
                 }}
               >
+                <If when={target()}>
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      width: stone(),
+                      height: stone(),
+                      borderRadius: stone() / 2,
+                      backgroundColor: "rgba(115,156,96,0.34)",
+                    }}
+                  />
+                </If>
                 <If when={value() !== 0}>
                   <View
                     testID={`c6-piece-${i()}-${value() === 1 ? "b" : "w"}`}
@@ -516,6 +527,13 @@ export function MultiBoard(props: {
                   : m.kind === "junqi"
                     ? JUNQI_NAMES[Math.abs(v())]
                     : (v() > 0 ? redXq : blackXq)[Math.abs(v())];
+          const preview = () => {
+            const state = props.match().state;
+            return m.kind === "xiangqi" && "board" in state
+              ? state.board[props.selected()] ?? 0
+              : 0;
+          };
+          const previewColor = () => v() ? C.accent : "#428957";
           return (
             <View
               role="button"
@@ -534,7 +552,7 @@ export function MultiBoard(props: {
                 backgroundColor:
                   props.selected() === i()
                     ? "#e3ba54"
-                    : props.targets().includes(i())
+                    : props.targets().includes(i()) && m.kind !== "xiangqi"
                       ? "#a6ca84aa"
                       : m.kind === "chess"
                         ? ((i() % w) + Math.floor(i() / w)) % 2
@@ -591,6 +609,34 @@ export function MultiBoard(props: {
                   />
                 </If>
               </View>
+              <If when={m.kind === "xiangqi" && props.targets().includes(i()) && preview() !== 0}>
+                <View
+                  pointerEvents="none"
+                  testID={`xiangqi-target-${i()}`}
+                  style={{
+                    position: "absolute",
+                    width: cell() * 0.78,
+                    height: cell() * 0.78,
+                    borderRadius: cell() * 0.39,
+                    backgroundColor: v() ? "#f9ded7" : "#dcebd6",
+                    borderWidth: 1.5,
+                    borderColor: previewColor(),
+                    opacity: 0.4,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: cell() * 0.47,
+                      fontWeight: "700",
+                      color: previewColor(),
+                    }}
+                  >
+                    {(preview() > 0 ? redXq : blackXq)[Math.abs(preview())]}
+                  </Text>
+                </View>
+              </If>
             </View>
           );
         }}
