@@ -20,6 +20,7 @@ import {
   type CanvasSize,
 } from "nsh";
 import { C } from "./ui";
+import { stoneAppearance, stoneDiameter } from "./Board";
 import { type Match } from "../lib/multigame";
 import { widthOf, heightOf, owner, squareName } from "../lib/royal";
 import {
@@ -81,7 +82,8 @@ export function MultiBoard(props: {
   };
   if (m.kind === "connect6") {
     const n = 4,
-      cell = () => props.size() / n;
+      cell = () => props.size() / n,
+      stone = () => stoneDiameter(props.size());
     const draw = (cx: CanvasRenderingContext2D, s: CanvasSize) => {
       const c = s.width / n;
       cx.fillStyle = "#e8c892";
@@ -146,21 +148,19 @@ export function MultiBoard(props: {
                   <View
                     testID={`c6-piece-${i()}-${value() === 1 ? "b" : "w"}`}
                     style={{
-                      width: cell() * 0.68,
-                      height: cell() * 0.68,
-                      borderRadius: cell() * 0.34,
-                      backgroundColor: value() === 1 ? "#201a15" : "#fffaf0",
-                      borderWidth: 1.5,
+                      ...stoneAppearance(value()),
+                      width: stone(),
+                      height: stone(),
+                      borderRadius: stone() / 2,
+                      borderWidth: props.selected() === i() ? 1 : stoneAppearance(value()).borderWidth,
                       borderColor:
                         props.selected() === i()
                           ? C.accent
-                          : value() === 1
-                            ? "#080605"
-                            : "#a89a89",
+                          : "#d3cabb",
                       boxShadow:
                         props.selected() === i()
                           ? "0 0 0 3px rgba(192,68,44,0.28)"
-                          : "0 2px 5px rgba(48,32,18,0.28)",
+                          : stoneAppearance(value()).boxShadow,
                       alignItems: "center",
                       justifyContent: "center",
                     }}
@@ -168,10 +168,12 @@ export function MultiBoard(props: {
                     <If when={last()}>
                       <View
                         style={{
-                          width: cell() * 0.16,
-                          height: cell() * 0.16,
-                          borderRadius: cell() * 0.08,
-                          backgroundColor: C.accent,
+                          width: Math.max(3, stone() * 0.18),
+                          height: Math.max(3, stone() * 0.18),
+                          borderRadius: Math.max(3, stone() * 0.18) / 2,
+                          backgroundColor: "#e04a35",
+                          borderWidth: 1,
+                          borderColor: "rgba(255,255,255,0.75)",
                         }}
                       />
                     </If>

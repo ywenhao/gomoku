@@ -19,6 +19,7 @@ export const SOUND_RATE = 22050;
 
 export const SOUND_NAMES = [
   "place",
+  "select",
   "tick",
   "timeout",
   "win",
@@ -35,6 +36,7 @@ export type SoundName = (typeof SOUND_NAMES)[number];
 /** 每个音效的时长（秒），SoundPlayer 用它做播放超时兜底。 */
 export const SOUND_SECONDS: Record<SoundName, number> = {
   place: 0.14,
+  select: 0.12,
   tick: 0.08,
   timeout: 0.62,
   win: 0.78,
@@ -49,6 +51,7 @@ export const SOUND_SECONDS: Record<SoundName, number> = {
 /** 每种音效的峰值音量：落子/胜利用力一点，倒计时滴答轻一点。 */
 const SOUND_PEAK: Record<SoundName, number> = {
   place: 0.78,
+  select: 0.28,
   tick: 0.42,
   timeout: 0.72,
   win: 0.8,
@@ -89,6 +92,18 @@ function renderPlace(n: number): Float64Array {
     const wood = Math.sin(TAU * 372 * t) * Math.exp(-t * 42) * 0.2;
     out[i] =
       (low * Math.exp(-t * 52) * 0.9 + body + wood) * Math.min(1, t / 0.002);
+  }
+  return out;
+}
+
+/** 选子：轻柔的低音，缓慢起音，与倒计时区分。 */
+function renderSelect(n: number): Float64Array {
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SOUND_RATE;
+    const fade = Math.min(1, (n / SOUND_RATE - t) / 0.025);
+    out[i] = (Math.sin(TAU * 220 * t) + Math.sin(TAU * 330 * t) * 0.15)
+      * decayEnv(t, 0.012, 28) * fade;
   }
   return out;
 }
@@ -238,6 +253,8 @@ function render(name: SoundName): Float64Array {
   switch (name) {
     case "place":
       return renderPlace(Math.round(SOUND_SECONDS.place * SOUND_RATE));
+    case "select":
+      return renderSelect(Math.round(SOUND_SECONDS.select * SOUND_RATE));
     case "tick":
       return renderTick(Math.round(SOUND_SECONDS.tick * SOUND_RATE));
     case "timeout":

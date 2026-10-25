@@ -244,6 +244,7 @@ function App() {
   const soundPrime = signal(0);
   const sounds: Record<SoundName, Signal<number>> = {
     place: signal(0),
+    select: signal(0),
     tick: signal(0),
     timeout: signal(0),
     win: signal(0),

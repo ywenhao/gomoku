@@ -24,7 +24,7 @@ function peakOf(wav: Uint8Array): number {
 }
 
 test("每个音效都是可播放的单声道 16-bit WAV", () => {
-  expect(SOUND_NAMES.length).toBe(10);
+  expect(SOUND_NAMES.length).toBe(11);
   for (const name of SOUND_NAMES) {
     const wav = synthesizeSound(name);
     const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);

@@ -12,6 +12,24 @@ import { SIZE, type Player } from "../lib/gomoku";
 const C_INK = "#2b241c";
 const C_ACCENT = "#c0442c";
 
+export const stoneDiameter = (boardSize: number, n = SIZE) => (boardSize / n) * 0.84;
+
+export function stoneAppearance(value: number) {
+  return {
+    backgroundColor: value === 1 ? "#17130f" : "#fcfaf5",
+    borderWidth: value === 2 ? 1 : 0,
+    borderColor: "#d3cabb",
+    backgroundImage:
+      value === 1
+        ? "radial-gradient(circle at 34% 27%, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0) 44%), linear-gradient(150deg, #4a453f 0%, #17130f 45%, #060404 100%)"
+        : "radial-gradient(circle at 34% 27%, #ffffff 0%, rgba(255,255,255,0) 54%), linear-gradient(150deg, #fdfbf6 0%, #efeade 55%, #d6cebd 100%)",
+    boxShadow:
+      value === 1
+        ? "0 2px 4px rgba(50,32,14,0.40)"
+        : "0 2px 4px rgba(50,32,14,0.28)",
+  };
+}
+
 export interface BoardMark {
   i: number;
   label?: string;
@@ -156,17 +174,7 @@ function Cell(props: CellProps) {
               width: stone(),
               height: stone(),
               borderRadius: stone() / 2,
-              backgroundColor: v() === 1 ? "#17130f" : "#fcfaf5",
-              borderWidth: v() === 2 ? 1 : 0,
-              borderColor: "#d3cabb",
-              backgroundImage:
-                v() === 1
-                  ? "radial-gradient(circle at 34% 27%, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0) 44%), linear-gradient(150deg, #4a453f 0%, #17130f 45%, #060404 100%)"
-                  : "radial-gradient(circle at 34% 27%, #ffffff 0%, rgba(255,255,255,0) 54%), linear-gradient(150deg, #fdfbf6 0%, #efeade 55%, #d6cebd 100%)",
-              boxShadow:
-                v() === 1
-                  ? "0 2px 4px rgba(50,32,14,0.40)"
-                  : "0 2px 4px rgba(50,32,14,0.28)",
+              ...stoneAppearance(v()),
             }}
           />
           <If when={isLast()}>
@@ -309,7 +317,7 @@ export function Board(props: {
   const noDead = computed<number[]>(() => []);
   const noMarks = computed<BoardMark[]>(() => []);
   const cell = computed(() => props.size() / n);
-  const stone = computed(() => cell() * 0.84);
+  const stone = computed(() => stoneDiameter(props.size(), n));
 
   return (
     <View

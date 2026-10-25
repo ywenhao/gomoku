@@ -127,7 +127,7 @@ function SoundPlayer(props: {
   );
 }
 
-/** 十个隐藏播放器；地址准备好之前什么都不挂，失败时游戏照样能玩。 */
+/** 隐藏的音效播放器；地址准备好之前什么都不挂，失败时游戏照样能玩。 */
 export function SoundBank(props: {
   srcs: Accessor<Partial<Record<SoundName, string>>>;
   triggers: Record<SoundName, Accessor<number>>;

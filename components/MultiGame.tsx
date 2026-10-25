@@ -347,7 +347,7 @@ export function MultiGame(props: {
               : 0;
     if (p === turn()) {
       selected.set(selected() === i ? -1 : i);
-      props.playSound("tick");
+      props.playSound(m.kind === "connect6" ? "select" : "tick");
       return;
     }
     if (!targets().includes(i)) {
