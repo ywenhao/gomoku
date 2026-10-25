@@ -23,6 +23,64 @@ function peakOf(wav: Uint8Array): number {
   return peak;
 }
 
+function pcmSamples(wav: Uint8Array): Float64Array {
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  const count = view.getUint32(40, true) / 2;
+  const samples = new Float64Array(count);
+  for (let i = 0; i < count; i++) {
+    samples[i] = view.getInt16(44 + i * 2, true) / 32768;
+  }
+  return samples;
+}
+
+function windowRms(
+  samples: Float64Array,
+  start: number,
+  length: number,
+): number {
+  let energy = 0;
+  for (let i = 0; i < length; i++) energy += samples[start + i] ** 2;
+  return Math.sqrt(energy / length);
+}
+
+/** 用归一化自相关估计指定时刻的基频，避免声调回归问题漏测。 */
+function pitchAt(samples: Float64Array, seconds: number): number {
+  const size = Math.round(SOUND_RATE * 0.04);
+  const center = Math.round(seconds * SOUND_RATE);
+  const start = Math.max(
+    0,
+    Math.min(samples.length - size, center - Math.floor(size / 2)),
+  );
+  let mean = 0;
+  for (let i = 0; i < size; i++) mean += samples[start + i];
+  mean /= size;
+
+  const frame = new Float64Array(size);
+  for (let i = 0; i < size; i++) {
+    const hamming = 0.54 - 0.46 * Math.cos((Math.PI * 2 * i) / (size - 1));
+    frame[i] = (samples[start + i] - mean) * hamming;
+  }
+
+  let bestLag = 0;
+  let bestCorrelation = -Infinity;
+  for (let lag = Math.floor(SOUND_RATE / 400); lag <= SOUND_RATE / 100; lag++) {
+    let dot = 0;
+    let left = 0;
+    let right = 0;
+    for (let i = 0; i < size - lag; i++) {
+      dot += frame[i] * frame[i + lag];
+      left += frame[i] ** 2;
+      right += frame[i + lag] ** 2;
+    }
+    const correlation = dot / Math.sqrt(left * right + 1e-12);
+    if (correlation > bestCorrelation) {
+      bestCorrelation = correlation;
+      bestLag = lag;
+    }
+  }
+  return SOUND_RATE / bestLag;
+}
+
 test("每个音效都是可播放的单声道 16-bit WAV", () => {
   expect(SOUND_NAMES.length).toBe(11);
   for (const name of SOUND_NAMES) {
@@ -47,6 +105,38 @@ test("每个音效都是可播放的单声道 16-bit WAV", () => {
     expect(data / 2).toBe(Math.round(SOUND_SECONDS[name] * SOUND_RATE));
     expect(peakOf(wav)).toBeGreaterThan(3000);
   }
+});
+
+test("将军语音连续，两个字都保持高平一声", () => {
+  const samples = pcmSamples(synthesizeSound("check"));
+  let peak = 0;
+  for (const sample of samples) peak = Math.max(peak, Math.abs(sample));
+
+  const frameSize = Math.round(SOUND_RATE * 0.01);
+  const levels: number[] = [];
+  for (let start = 0; start + frameSize <= samples.length; start += frameSize) {
+    levels.push(windowRms(samples, start, frameSize));
+  }
+  let firstVoiced = -1;
+  let lastVoiced = -1;
+  for (let i = 0; i < levels.length; i++) {
+    if (levels[i] < peak * 0.02) continue;
+    if (firstVoiced < 0) firstVoiced = i;
+    lastVoiced = i;
+  }
+  expect(firstVoiced).toBeGreaterThan(0);
+  expect(lastVoiced).toBeLessThan(levels.length - 1);
+  for (let i = firstVoiced + 1; i < lastVoiced; i++) {
+    expect(levels[i]).toBeGreaterThan(peak * 0.01);
+  }
+
+  const firstTone = pitchAt(samples, 0.13);
+  const secondTone = pitchAt(samples, 0.5);
+  expect(firstTone).toBeGreaterThan(180);
+  expect(firstTone).toBeLessThan(220);
+  expect(secondTone).toBeGreaterThan(180);
+  expect(secondTone).toBeLessThan(220);
+  expect(Math.abs(firstTone - secondTone)).toBeLessThan(12);
 });
 
 test("音效合成可复现，并且做了峰值归一化", () => {
