@@ -107,8 +107,8 @@ function SoundPlayer(props: {
       volume={1}
       controls={false}
       onEnd={() => playing.set(false)}
-      onError={() => {
-        console.warn("音效播放失败", props.name);
+      onError={(error) => {
+        console.warn("音效播放失败", props.name, error.message);
         playing.set(false);
       }}
       accessible={false}

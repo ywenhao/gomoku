@@ -1,10 +1,9 @@
 /**
  * 游戏音效：启动时用代码合成 WAV，不往仓库里放音频文件，也不加依赖。
  *
- * - 原生：写到应用数据目录，再交给隐藏的 <Video> 播放。桌面端使用裸路径；
- *   Android / iOS 使用百分号编码的单斜杠 file:/ URI，既满足 MediaPlayer
- *   对 scheme 的要求，也不会被 NSH 的媒体访问控制当成网络 URL 拒绝。
- * - Web：直接生成 data URI（浏览器不需要落地文件）。
+ * - Android / Web：直接生成 WAV data URI，交给隐藏的 <Video> 播放。
+ *   NSH 0.2.0 的 fs/promises 在 Android 上不可用，不能依赖运行时写文件。
+ * - 桌面端：写到应用数据目录，再把本地路径交给隐藏的 <Video> 播放。
  *
  * 采样统一为 22.05 kHz / 单声道 / 16-bit PCM —— AVPlayer、MediaPlayer、
  * Media Foundation、GStreamer 和 HTML5 都能直接播。
@@ -352,9 +351,9 @@ export function synthesizeSound(name: SoundName): Uint8Array {
 export async function soundUrls(): Promise<Partial<Record<SoundName, string>>> {
   const urls: Partial<Record<SoundName, string>> = {};
 
-  if (platform.os === "web") {
+  if (platform.os === "web" || platform.os === "android") {
     for (const name of SOUND_NAMES) {
-      // A data URI also works on nsh hosts that cannot transfer their QuickJS blob URLs to the browser.
+      // Android MediaPlayer 支持 base64 data URI；Web 也不依赖 QuickJS Blob URL。
       urls[name] =
         "data:audio/wav;base64," + encodeBase64(synthesizeSound(name));
     }
@@ -367,7 +366,8 @@ export async function soundUrls(): Promise<Partial<Record<SoundName, string>>> {
   const dir = join(dataDir, "sounds");
   try {
     await mkdir(dir, { recursive: true });
-  } catch {
+  } catch (error) {
+    console.warn("音效目录创建失败", error);
     return urls;
   }
 
@@ -375,23 +375,20 @@ export async function soundUrls(): Promise<Partial<Record<SoundName, string>>> {
     try {
       const file = join(dir, `gomoku-${name}-v${FILE_VERSION}.wav`);
       if (!(await exists(file))) await writeFile(file, synthesizeSound(name));
-      urls[name] =
-        platform.os === "android" || platform.os === "ios"
-          ? soundFileUri(file)
-          : file;
-    } catch {
-      /* 没有写权限或文件系统不可用时，这个音效静默跳过 */
+      urls[name] = platform.os === "ios" ? soundFileUri(file) : file;
+    } catch (error) {
+      console.warn("音效文件准备失败", name, error);
     }
   }
   return urls;
 }
 
 /**
- * 把移动端绝对路径转成 video 播放器可解析的 file:/ URI。
+ * 把文件绝对路径转成 video 播放器可解析的 file:/ URI。
  * 盘符冒号和路径分隔符保留，其余每一段都做百分号编码，避免空格、中文
  * 和 Windows 反斜杠在不同平台上被当成参数或非法 URI。这里故意只写一个
- * 斜杠：NSH 不允许没有 network 能力时加载含 `://` 的地址，而 Android
- * MediaPlayer 又需要通过 scheme 知道这是本地文件。
+ * 斜杠：NSH 不允许没有 network 能力时加载含 `://` 的地址。Android
+ * 音效已使用 data URI，不经过此文件路径转换。
  */
 export function soundFileUri(file: string): string {
   let path = file.replace(/\\/g, "/");

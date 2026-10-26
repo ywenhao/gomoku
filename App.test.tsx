@@ -288,27 +288,30 @@ test("双人模式菜单打开时倒计时也暂停", async () => {
   expect(app.shows("id:timer-urgent")).toBe(false);
 });
 
-test("Web 上会挂载隐藏音效播放器", async () => {
-  const app = await fresh({ platform: "web" });
-  await app.waitFor("id:sound-place");
-  for (const name of [
-    "place",
-    "tick",
-    "timeout",
-    "win",
-    "loss",
-    "draw",
-    "check",
-    "roll",
-    "capture",
-    "undo",
-  ]) {
-    expect(app.count(`id:sound-${name}`)).toBe(1);
-  }
-  // 触发一次落子音效，确认隐藏播放器不会把对局弄崩
-  await app.press("id:cell-7-7");
-  expect(app.shows("id:stone-7-7-b")).toBe(true);
-});
+for (const platform of ["web", "android"] as const) {
+  test(`${platform} 上会挂载全部音效播放器并支持落子`, async () => {
+    const app = await fresh({ platform });
+    await app.waitFor("id:sound-place");
+    for (const name of [
+      "place",
+      "select",
+      "tick",
+      "timeout",
+      "win",
+      "loss",
+      "draw",
+      "check",
+      "roll",
+      "capture",
+      "undo",
+    ]) {
+      expect(app.count(`id:sound-${name}`)).toBe(1);
+    }
+    // 触发一次落子音效，确认隐藏播放器不会把对局弄崩
+    await app.press("id:cell-7-7");
+    expect(app.shows("id:stone-7-7-b")).toBe(true);
+  });
+}
 
 test("最后 5 秒进入红色闪烁警告", async () => {
   const app = await fresh({ clock: {} });
