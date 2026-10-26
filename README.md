@@ -124,13 +124,25 @@ npx wrangler@latest pages deploy dist/web --project-name yijing --branch main
 
 Windows、Linux、macOS、Android、Web的可下载包在 [Releases](https://github.com/ywenhao/gomoku/releases)。macOS为Apple Silicon版；Linux需GTK4.14+；Android未配置仓库签名凭据时为debug签名。iOS可在有签名证书的macOS上本地打包，目前不由CI发布。
 
-发布前同步 `nsh.json` 与 `package.json` 版本、增加构建号，完成检查与测试并提交，然后运行：
+先把功能代码提交到 `main`，保持工作区干净。版本号和构建号由脚本自动更新，无需手动修改：
 
 ```sh
-npm run release:dry
-npm run release
+npm run release:dry                # 预览下一个 patch 版本，不修改文件或 Git
+npm run release                    # 默认 patch，例如 1.5.14 → 1.5.15
+npm run release -- minor           # 例如 1.5.14 → 1.6.0
+npm run release -- major           # 例如 1.5.14 → 2.0.0
+npm run release -- 1.6.2            # 指定一个更高的正式版本
+npm run release:dry -- minor       # 也可以预览 minor / major / 指定版本
 ```
 
-脚本校验工作区与版本、创建并推送 `v*` 标签；GitHub Actions构建五个平台，构建全部成功后上传到Release。不要仅以标签推送成功代替发布完成，应确认Release及五个附件。
+脚本同步 `package.json`、`nsh.json` 的版本并将 `build` 加一；如果 `CHANGELOG.md` 有「`## 未发布`」或「`## Unreleased`」，将其作为新版本说明，否则从上一个版本标签以来的提交标题自动生成。手写的未发布说明也须先提交。
+
+正式执行会检查远端同步情况，运行类型检查、全部测试和发布编译，创建版本提交和 `v*` 标签，再一次原子推送 `main` 与标签。校验失败时还原脚本写入的版本与更新记录，不产生发布提交；推送失败则保留已创建的提交与标签，可重试同一个版本：
+
+```sh
+npm run release -- --retry
+```
+
+`--retry` 不再次升级版本。GitHub Actions 构建五个平台，全部成功后上传到 Release；发布是否完成应以 Release 和五个附件为准。
 
 版本变化见 [CHANGELOG.md](CHANGELOG.md)。
