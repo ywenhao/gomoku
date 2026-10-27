@@ -9,7 +9,7 @@ inputs:
   version:
     description: "发行版 tag，例如 v0.2.0（留空取最新）"
     required: false
-    default: v0.2.0
+    # default: v0.2.0
 
 runs:
   using: composite
